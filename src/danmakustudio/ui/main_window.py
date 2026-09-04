@@ -125,7 +125,7 @@ class DanmakuStudioWindow(QWidget):
         super().__init__()
         self.setWindowTitle("DanmakuStudio · 弹幕压制工作台")
         self.setObjectName("appRoot")
-        self.resize(1150, 820)
+        self.resize(1120, 780)
         self.setMinimumSize(900, 640)
         self.worker: BatchWorker | None = None
         self.pending_jobs: list[BatchJob] = []
@@ -136,8 +136,8 @@ class DanmakuStudioWindow(QWidget):
         self._load_last_config_dir()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(16)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(12)
 
         header = QHBoxLayout()
         header.setSpacing(13)
@@ -409,7 +409,7 @@ class DanmakuStudioWindow(QWidget):
         main_split.addWidget(task_card)
         main_split.setStretchFactor(0, 1)
         main_split.setStretchFactor(1, 0)
-        main_split.setSizes([560, 280])
+        main_split.setSizes([500, 290])
         layout.addWidget(main_split, 1)
 
         self._reload_style_panel()
@@ -565,8 +565,16 @@ class DanmakuStudioWindow(QWidget):
         convert_row.addWidget(self.btn_json_convert)
         convert_row.addStretch(1)
         layout.addLayout(convert_row)
-        layout.addStretch(1)
-        return card
+        return self._hug_content_page(card)
+
+    def _hug_content_page(self, card: QFrame) -> QWidget:
+        """功能页容器：卡片贴内容高度，避免大片空白卡片。"""
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(card)
+        page_layout.addStretch(1)
+        return page
 
     def _build_download_page(self) -> QFrame:
         """「下载内容」功能页：yt-dlp 下载视频 / 弹幕 / 封面。"""
@@ -625,8 +633,7 @@ class DanmakuStudioWindow(QWidget):
         download_row.addWidget(self.btn_download_start)
         download_row.addStretch(1)
         layout.addLayout(download_row)
-        layout.addStretch(1)
-        return card
+        return self._hug_content_page(card)
 
     def _update_clip_start_enabled(self, *_args) -> None:
         """自定义起点仅在与测试片段同时启用时可用。"""

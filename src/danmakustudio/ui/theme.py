@@ -103,6 +103,12 @@ QFrame#card {
     border-radius: 14px;
 }
 
+QFrame#previewCard {
+    background: #f9fafc;
+    border: 1px solid #e0e5ee;
+    border-radius: 12px;
+}
+
 QFrame#sidebar {
     background: #ffffff;
     border: 1px solid #e0e5ee;

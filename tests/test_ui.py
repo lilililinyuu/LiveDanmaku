@@ -632,3 +632,50 @@ def test_main_window_task_area_below_pages(qapp):
     assert task_bottom >= page_bottom - 8
 
     window.close()
+
+
+def test_style_preview_fixed_beside_tabs(qapp):
+    """样式预览应与控件区分栏同排固定，调整 tab 时无需滚动即可见。"""
+    apply_theme(qapp)
+    panel = StylePanel()
+    panel.resize(900, 620)
+    panel.show()
+    qapp.processEvents()
+
+    preview_left = panel.preview.mapTo(panel, panel.preview.rect().topLeft()).x()
+    tabs_right = (
+        panel.tabs.mapTo(panel, panel.tabs.rect().topLeft()).x() + panel.tabs.width()
+    )
+    assert preview_left >= tabs_right - 2, "预览板应在控件区右侧而非下方"
+
+    # 预览高度不再固定为小横条，可随面板高度扩展
+    assert panel.preview.height() >= 170
+
+    panel.close()
+
+
+def test_json_download_pages_hug_content(qapp):
+    """JSON 与下载页的卡片应贴内容高度，不占满整个页面。"""
+    from PySide6.QtWidgets import QFrame
+
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+    window.resize(1120, 780)
+    window.show()
+    qapp.processEvents()
+
+    window.nav_list.setCurrentRow(2)
+    qapp.processEvents()
+    page = window.pages.widget(2)
+    card = page.findChild(QFrame)
+    assert card is not None
+    assert card.height() < page.height(), "JSON 卡片不应拉伸占满页面"
+
+    window.nav_list.setCurrentRow(3)
+    qapp.processEvents()
+    page3 = window.pages.widget(3)
+    card3 = page3.findChild(QFrame)
+    assert card3 is not None
+    assert card3.height() < page3.height(), "下载卡片不应拉伸占满页面"
+
+    window.close()

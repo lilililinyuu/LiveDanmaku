@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -221,7 +222,7 @@ class StylePreview(QWidget):
         self._panel = panel
         self._bg = QColor(self.DEFAULT_BG)
         self.setObjectName("stylePreview")
-        self.setFixedHeight(140)
+        self.setMinimumHeight(170)
 
     def set_bg_color(self, hex_str: str | None) -> None:
         """设置预览区背景颜色（仅界面显示，不影响压制输出）。"""
@@ -331,17 +332,16 @@ class StylePanel(QWidget):
         self.custom_check.toggled.connect(self._update_enabled)
         header_row.addWidget(self.custom_check)
         header_row.addStretch(1)
-        header_row.addWidget(QLabel("预览背景"))
-        self.preview_bg_btn = ColorButton()
-        self.preview_bg_btn.setToolTip("预览区背景颜色（仅界面显示，不影响压制输出）")
-        self.preview_bg_btn.set_color_hex(StylePreview.DEFAULT_BG)
-        self.preview_bg_btn.changed.connect(self._apply_preview_bg)
-        header_row.addWidget(self.preview_bg_btn)
         self.reset_btn = QPushButton("重置为默认样式")
         self.reset_btn.setToolTip("把界面样式恢复为内置默认样式")
         self.reset_btn.clicked.connect(self.reset_to_default)
         header_row.addWidget(self.reset_btn)
         layout.addLayout(header_row)
+
+        # 左右分栏：左侧控件区（公共行 + 分组 tab），右侧固定预览板块——
+        # 调整任意 tab 中的样式时无需滚动即可看到实时效果
+        columns = QHBoxLayout()
+        columns.setSpacing(14)
 
         self.content = QWidget()
         content_layout = QVBoxLayout(self.content)
@@ -397,10 +397,33 @@ class StylePanel(QWidget):
         self.tabs.addTab(emoji_page, "表情")
         content_layout.addWidget(self.tabs)
 
-        self.preview = StylePreview(self)
-        content_layout.addWidget(self.preview)
+        columns.addWidget(self.content, 1)
 
-        layout.addWidget(self.content)
+        # 固定预览板块：始终与控件区同排可见
+        preview_card = QFrame()
+        preview_card.setObjectName("previewCard")
+        preview_layout = QVBoxLayout(preview_card)
+        preview_layout.setContentsMargins(12, 12, 12, 12)
+        preview_layout.setSpacing(8)
+        preview_title = QLabel("样式预览")
+        preview_title.setObjectName("sectionTitle")
+        preview_layout.addWidget(preview_title)
+        self.preview = StylePreview(self)
+        preview_layout.addWidget(self.preview, 1)
+        bg_row = QHBoxLayout()
+        bg_row.setSpacing(8)
+        bg_row.addWidget(QLabel("预览背景"))
+        self.preview_bg_btn = ColorButton()
+        self.preview_bg_btn.setToolTip("预览区背景颜色（仅界面显示，不影响压制输出）")
+        self.preview_bg_btn.set_color_hex(StylePreview.DEFAULT_BG)
+        self.preview_bg_btn.changed.connect(self._apply_preview_bg)
+        bg_row.addWidget(self.preview_bg_btn)
+        bg_row.addStretch(1)
+        preview_layout.addLayout(bg_row)
+        preview_card.setFixedWidth(300)
+        columns.addWidget(preview_card)
+
+        layout.addLayout(columns)
         self._update_enabled(False)
         self._wire_preview()
 
