@@ -472,13 +472,13 @@ class DanmakuStudioWindow(QWidget):
         self.style_panel.load_from(config)
 
     def _wrap_scroll(self, widget: QWidget) -> QScrollArea:
-        """把页面内容包进滚动区：高度不足时滚动而非压缩控件。"""
+        """把页面内容包进滚动区：高度不足时滚动；卡片贴内容高度不拉伸出空白。"""
         scroll = QScrollArea()
         scroll.setObjectName("settingsScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(widget)
+        scroll.setWidget(self._hug_content_page(widget))
         return scroll
 
     def _build_sidebar(self) -> QFrame:
@@ -559,12 +559,19 @@ class DanmakuStudioWindow(QWidget):
         form.addRow("聊天 JSON", path_row)
         layout.addLayout(form)
 
-        convert_row = QHBoxLayout()
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
         self.btn_json_convert = QPushButton("转换为 XML")
         self.btn_json_convert.clicked.connect(self.start_json_convert)
-        convert_row.addWidget(self.btn_json_convert)
-        convert_row.addStretch(1)
-        layout.addLayout(convert_row)
+        action_row.addWidget(self.btn_json_convert)
+        self.btn_highlights = QPushButton("分析高潮点")
+        self.btn_highlights.setToolTip(
+            "按弹幕发送频率分析聊天 JSON，找出最热闹的时间段（高潮点）"
+        )
+        self.btn_highlights.clicked.connect(self.analyze_chat_highlights)
+        action_row.addWidget(self.btn_highlights)
+        action_row.addStretch(1)
+        layout.addLayout(action_row)
         return self._hug_content_page(card)
 
     def _hug_content_page(self, card: QFrame) -> QWidget:
@@ -760,7 +767,7 @@ class DanmakuStudioWindow(QWidget):
             self.btn_drop_reference, self.drop_first_spin,
             self.test_clip_check, self.clip_duration_spin,
             self.clip_start_check, self.clip_start_spin,
-            self.btn_json_convert, self.btn_download_start,
+            self.btn_json_convert, self.btn_highlights, self.btn_download_start,
         ):
             widget.setEnabled(not locked)
         if not locked:
@@ -916,18 +923,64 @@ class DanmakuStudioWindow(QWidget):
 
     def start_json_convert(self) -> None:
         """把页面选择的聊天 JSON 转换为弹幕 XML。"""
+        json_path = self._selected_chat_json()
+        if json_path is None:
+            return
+        self._convert_chat_json_and_adopt(json_path)
+
+    def _selected_chat_json(self):
+        """校验并返回页面选择的聊天 JSON；无效时弹窗提示并返回 None。"""
         if self.worker is not None and self.worker.isRunning():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
-            return
+            return None
         path_text = self.json_path_edit.text().strip()
         if not path_text:
             QMessageBox.warning(self, "提示", "请先选择聊天 JSON 文件。")
-            return
+            return None
         json_path = Path(path_text)
         if not json_path.is_file():
             QMessageBox.warning(self, "提示", f"文件不存在: {json_path}")
+            return None
+        return json_path
+
+    def analyze_chat_highlights(self) -> None:
+        """按弹幕发送频率分析聊天 JSON，把高潮时间段写入日志。"""
+        json_path = self._selected_chat_json()
+        if json_path is None:
             return
-        self._convert_chat_json_and_adopt(json_path)
+
+        from ..core.highlight import (
+            analyze_highlights,
+            extract_chat_times,
+            format_clock,
+        )
+
+        try:
+            times = extract_chat_times(str(json_path))
+        except OSError as e:
+            QMessageBox.warning(self, "提示", f"聊天 JSON 读取失败: {e}")
+            return
+        if not times:
+            QMessageBox.warning(self, "提示", "未从聊天 JSON 中提取到任何弹幕消息。")
+            return
+
+        intervals = analyze_highlights(times)
+        duration = format_clock(times[-1])
+        self.log.clear()
+        self.append_log(f"直播高潮点分析: {json_path.name}")
+        self.append_log(f"  弹幕总数 {len(times)} 条，时间跨度 {duration}（相对首条弹幕）")
+        if not intervals:
+            self.append_log("  未发现明显的弹幕密集段（发送频率较均匀）。")
+        else:
+            self.append_log("  弹幕最密集的时间段（按窗口 10 秒统计，取前 5 名）:")
+            for rank, it in enumerate(intervals, start=1):
+                self.append_log(
+                    f"    #{rank}  {format_clock(it.start)} – {format_clock(it.end)}"
+                    f"   峰值 {it.peak} 条/10s，合计 {it.count} 条"
+                )
+        self.summary_label.setText(
+            f"高潮点分析完成: {len(intervals)} 段（详见日志）"
+        )
 
     def _convert_chat_json_and_adopt(self, json_path: Path) -> None:
         """转换聊天 JSON 为 XML；检测到同名视频时询问加入任务队列。"""

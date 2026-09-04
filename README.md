@@ -7,15 +7,16 @@
 - **图形化批量处理** - 可多选视频或文件夹，自动递归查找文件夹内视频
 - **自动匹配字幕** - 自动寻找同目录下同名 XML/LRC 字幕；XML 和 LRC 同时存在时优先选择 XML
 - **XML/LRC 支持** - XML 支持普通弹幕与会员弹幕；LRC 支持时间轴文本，并尽量识别常见导出格式中的用户名
-- **开头弹幕删除** - 可删除开头 N 条弹幕（如直播开始前的测试弹幕）；pipeline 工作台还支持从前 40 条中参照选择一条，删除其之前的全部弹幕
-- **滚动弹幕** - 弹幕从视频右端向左匀速滚动，多行车道布局，长文本自动折行
+- **开头弹幕删除** - 可删除开头 N 条弹幕（如直播开始前的测试弹幕）；支持从前 40 条中参照选择一条，删除其之前的全部弹幕
+- **滚动弹幕** - 弹幕从视频右端向左匀速滚动，多行车道布局
 - **文本样式** - 字体颜色/字体类型/大小可调，支持描边与文本阴影（颜色+不透明度）；会员与普通用户样式可完全分开调整
-- **Emoji 图片加载** - 本地 `assets/emoji/` PNG 与 YouTube 平台表情（由 `json2xml.py` 在 XML 中内嵌图片 URL，压制时按需下载缓存到 `~/.danmakustudio_emoji_cache/`）均可显示，不透明度、大小、间距独立可调
+- **Emoji 图片加载** - 本地 `assets/emoji/` PNG 与 YouTube 平台表情（转换时在 XML 中内嵌图片 URL，压制时按需下载缓存到 `~/.danmakustudio_emoji_cache/`）均可显示，不透明度、大小、间距独立可调
 - **字体回退** - 多字体族链式匹配，未覆盖字符自动尝试系统字体回退
 - **FFmpeg 编码** - 支持自动检测 GPU / QSV / CPU 编码路径；自动模式下无可用硬件编码时回退到 CPU
-- **自定义压缩参数** - `encode.extra_args` / `--ffmpeg-args` 可追加任意 ffmpeg 参数，完全接管压缩设置
-- **一键全流程** - `danmakustudio pipeline` 集成：yt-dlp 下载直播回放+弹幕 → 转 XML → 预览图 → 1 分钟测试片段 → 确认 → 全量压缩
-- **预览图与测试片段** - 压制前可用 `preview` 命令生成预览图、`--test-clip` 只压 1 分钟片段确认效果；图形界面中点击"生成预览图…"可直接生成
+- **自定义压缩参数** - `encode.extra_args` 与界面「自定义参数」输入框可追加任意 ffmpeg 参数，完全接管压缩设置
+- **直播高潮点分析** - 根据弹幕 JSON 的时间戳统计发送频率，自动找出直播最热闹的时间段
+- **JSON 转 XML** - 界面内把 yt-dlp 导出的聊天 JSON 转换为弹幕 XML；检测到同名视频可直接加入任务队列
+- **预览图与测试片段** - 压制前用「生成预览图…」确认样式，或勾选「只导出测试片段」先压一段确认效果
 
 ## 环境要求
 
@@ -24,7 +25,7 @@
 - Python >= 3.13
 - FFmpeg / ffprobe 可在命令行中直接运行
 - 依赖包：`lxml` `PySide6` `loguru` `tqdm` `pyyaml`
-- `yt-dlp`（可选）：仅 `pipeline` 命令需要，用于下载直播回放视频与弹幕 JSON（`pip install yt-dlp`）
+- `yt-dlp`（可选）：仅界面「下载内容」页需要，用于下载直播回放视频与弹幕 JSON（`pip install yt-dlp`）
 
 ### EXE 运行
 
@@ -157,104 +158,27 @@ danmakustudio
 
 **"压制设置"** 页可调整：首条弹幕时间、删除开头弹幕（可点击 **"参照选择…"** 从前 40 条中指定保留哪一条，其之前的全部删除）、测试片段（时长与自定义起点）、FFmpeg 自定义参数。任务区点击 **"生成预览图…"** 可选一个视频，用当前界面设置渲染弹幕预览 PNG。
 
-### 命令行
+### 典型流程
 
-```bash
-danmakustudio source/视频.mp4 source/弹幕.xml
-danmakustudio source/视频.mp4 source/字幕.lrc
-```
+1. 「下载内容」页输入链接下载直播回放视频与弹幕（或直接使用已有视频和 JSON）
+2. 「JSON 转 XML」页转换弹幕，检测到同名视频时一键加入任务队列；也可点 **"分析高潮点"** 查看直播最热闹的时间段
+3. 「压制设置」页调整编码模式、首条弹幕时间、删除开头弹幕、测试片段等
+4. 「弹幕样式」页调整样式，右侧预览实时可见；需要时点 **"生成预览图…"** 用真实视频帧确认
+5. 勾选 **"只导出测试片段"** 先压一段确认效果，确认无误后取消勾选，点击 **"开始压制 →"** 完成全量压制
 
-指定编码模式和输出路径：
-
-```bash
-danmakustudio source/视频.mp4 source/弹幕.xml --encode gpu -o output.mp4 -f
-```
-
-删除开头 N 条弹幕（如直播开始前的测试弹幕）：
-
-```bash
-danmakustudio source/视频.mp4 source/弹幕.xml --drop-first 5
-```
-
-使用自定义配置文件：
-
-```bash
-danmakustudio source/视频.mp4 source/弹幕.xml -c danmakustudio.yaml
-```
-
-### 预览图（压制前确认样式）
-
-```bash
-danmakustudio preview source/视频.mp4 source/弹幕.xml [-c 配置] [-t 10,300,600] [-o 输出目录] [--drop-first N] [--yes]
-```
-
-默认自动挑选 3 个时间点（首条弹幕处 + 弹幕分布中点 + 末尾）；时间点没有可见弹幕时会自动向后微调。生成后打印 PNG 路径并询问是否用系统图片查看器打开。
-
-### 测试片段（先压 1 分钟确认效果）
-
-```bash
-danmakustudio source/视频.mp4 source/弹幕.xml --test-clip [--clip-start 秒] [--clip-duration 60]
-```
-
-默认从**首条弹幕处**开始压 60 秒，输出自动命名为 `xxx.test-clip.mp4`；片段起点晚于 0 时弹幕从画面中部继续滚动，与完整压制完全一致。确认效果后去掉 `--test-clip` 重跑即可完成全量压制。
-
-### 自定义 ffmpeg 压缩参数
-
-```bash
-danmakustudio source/视频.mp4 source/弹幕.xml --ffmpeg-args "-preset faster -crf 26 -maxrate 4M -bufsize 8M"
-```
-
-参数追加在 ffmpeg 命令末尾（后出现的参数优先生效），可覆盖默认压缩设置；也可写入配置文件 `encode.extra_args`（列表形式）。
-
-### 弹幕压制工作台（菜单选择步骤，无固定顺序）
-
-```bash
-# source 可以是 YouTube 直播回放链接，也可以是本地视频文件
-danmakustudio pipeline "https://www.youtube.com/watch?v=xxxx" [选项]
-danmakustudio pipeline source/视频.mp4 [选项]
-```
-
-进入交互菜单，**自由选择要执行的步骤**（可反复执行、任意顺序、q 退出）：
-
-```text
-[1] 下载直播回放（yt-dlp，仅 URL 源）
-[2] 下载视频封面（yt-dlp，转 PNG）
-[3] 弹幕 JSON 转 XML
-[4] 删除开头弹幕（前 N 条 / 前 40 条参照选择）
-[5] 弹幕渲染配置摘要
-[6] 生成预览图
-[7] 展示 ffmpeg 压缩命令
-[8] 测试压缩片段（先确认效果）
-[9] 完整视频压缩
-```
-
-以本地视频为源时，自动匹配同目录同名 JSON（`xxx.live_chat.json` 或 `xxx.json`）；以 URL 为源时先执行步骤 1 下载。
-
-步骤 4 用于去掉直播开始前发出的测试弹幕等：直接输入 N 删除开头 N 条（0 撤销删除）；输入 `r` 会列出前 40 条弹幕（序号/时间/用户/内容），选择保留第几条，其之前的弹幕全部删除。设置作用于之后的预览图、测试片段与完整压缩，重复执行步骤 4 可覆盖。
-
-常用选项：`-c 配置`、`--out-dir 目录`（下载与中间产物）、`--encode auto|gpu|qsv|cpu`、`--lead-in 秒`（首条弹幕时间）、`--drop-first N`（删除开头 N 条弹幕，跳过交互步骤 4）、`--clip-duration 秒`（测试片段时长，默认 60）、`--ffmpeg-args "..."`（自定义压缩参数）、`--yes`（跳过"是否打开预览"等询问）、`--format "..."`（yt-dlp 下载格式）。下载需 yt-dlp 已安装且可访问 YouTube。
-
-### 弹幕 JSON → XML（单独转换）
-
-```bash
-python json2xml.py [输入.json] [输出.xml] [--lead-in 秒]
-```
-
-默认输入 `chat.json`、输出 `video.xml`、首条弹幕 0 秒出现；工作台步骤 2 与图形界面的"JSON 转 XML…"按钮内部均调用同一转换。
-
-## 配置
+## 配置## 配置
 
 通过 `danmakustudio.yaml` 调整行为。
 
 配置优先级：
 
 ```text
-命令行指定的配置文件 > 当前目录 danmakustudio.yaml > 用户目录 danmakustudio.yaml > 内置默认值
+界面「配置文件」框指定的 YAML > 当前目录 danmakustudio.yaml > 用户目录 danmakustudio.yaml > 内置默认值
 ```
 
 如果显式指定的配置文件不存在或结构不合法，程序会直接报错，不会继续回退到其它配置文件。
 
-源码运行时，程序会读取当前工作目录下的 `danmakustudio.yaml`；EXE 运行时，图形界面会优先使用 exe 同目录下的 `danmakustudio.yaml`，用户可以直接编辑。
+EXE 运行时，图形界面会优先使用 exe 同目录下的 `danmakustudio.yaml`，用户可以直接编辑；也可以在界面「保存样式到 YAML…」中把当前样式写出为新配置。
 
 下表中，“随项目配置值”来自当前仓库中的 `danmakustudio.yaml`；删除该文件或删除某个字段后，对应字段会回退到“内置默认值”。
 
@@ -386,15 +310,16 @@ dist\DanmakuStudio\DanmakuStudio.exe
 ```text
 DanmakuStudio/
 ├── src/danmakustudio/        # 核心包
-│   ├── cli.py                # CLI 入口（encode/preview/pipeline 子命令）
+│   ├── cli.py                # 图形界面启动入口（控制台脚本 danmakustudio）
 │   ├── gui.py                # 图形界面入口
 │   ├── batch.py              # 批量文件发现与字幕匹配
 │   ├── config/               # 配置模块
-│   ├── core/                 # 压制流程编排（burner/pipeline/preview）
+│   ├── core/                 # 压制流程编排（burner/preview）、yt-dlp 下载辅助（pipeline）、高潮点分析（highlight）
 │   ├── encode/               # FFmpeg 进程管理
 │   ├── input/                # XML/LRC 字幕解析、YouTube 聊天 JSON 转换（chat2xml）
 │   ├── layout/               # 布局计算、活跃弹幕状态
 │   ├── render/               # 文本渲染、图片资源加载（emoji_fetch 远程表情下载）
+│   ├── ui/                   # 图形界面（主窗口/样式面板/下载与转换页/后台线程）
 │   └── utils/                # 工具函数与输入输出校验
 ├── tests/                    # 测试
 ├── DanmakuStudio.spec        # PyInstaller 打包配置
@@ -404,7 +329,6 @@ DanmakuStudio/
 ├── build_exe.ps1             # 一键打包 / 打包前检
 ├── scripts/_common.ps1       # PowerShell 公共辅助函数
 ├── danmakustudio.yaml        # 默认配置文件
-├── json2xml.py               # YouTube 弹幕 JSON → XML 转换脚本（薄封装）
 ├── pyproject.toml
 ├── uv.lock
 ├── LICENSE

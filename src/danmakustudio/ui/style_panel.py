@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetrics,
+    QImage,
     QPainter,
 )
 from PySide6.QtWidgets import (
@@ -42,6 +43,7 @@ from ..config.models import (
     TextStyle,
 )
 from ..input.event import DanmakuEvent
+from ..render.assets import _RESOURCE_ROOT
 from ..render.layout_builder import DanmakuLayoutBuilder
 from ._shared import gui_style_path
 
@@ -170,11 +172,6 @@ class TextStyleControls(QWidget):
         shadow_row.addStretch(1)
         layout.addRow("阴影", shadow_row)
 
-        hint = QLabel("提示：描边不透明度跟随字体不透明度一起变化，无需单独设置。")
-        hint.setObjectName("fieldHint")
-        hint.setWordWrap(True)
-        layout.addRow("", hint)
-
         outer.addLayout(layout)
 
     def load_from(self, ts: TextStyle) -> None:
@@ -216,6 +213,8 @@ class StylePreview(QWidget):
     """实时样式预览：用面板当前样式渲染示例弹幕。"""
 
     DEFAULT_BG = "#808080"
+    # 预览用表情（取自 assets/emoji），连续 3 个以展示大小与间距效果
+    EMOJI_NAMES = ("_LOL草", "_RedPen", "_Surprise驚き")
 
     def __init__(self, panel: StylePanel, parent: QWidget | None = None):
         super().__init__(parent)
@@ -223,6 +222,17 @@ class StylePreview(QWidget):
         self._bg = QColor(self.DEFAULT_BG)
         self.setObjectName("stylePreview")
         self.setMinimumHeight(170)
+        self._emoji_images = self._load_emoji_images()
+
+    def _load_emoji_images(self) -> dict[str, QImage]:
+        """加载预览用本地表情原图；缺失时忽略，对应文字按原样显示。"""
+        images: dict[str, QImage] = {}
+        emoji_dir = _RESOURCE_ROOT / "assets" / "emoji"
+        for name in self.EMOJI_NAMES:
+            img = QImage(str(emoji_dir / f"{name}.png"))
+            if not img.isNull():
+                images[name] = img
+        return images
 
     def set_bg_color(self, hex_str: str | None) -> None:
         """设置预览区背景颜色（仅界面显示，不影响压制输出）。"""
@@ -253,17 +263,29 @@ class StylePreview(QWidget):
         fm = QFontMetrics(font)
         line_height = fm.height()
 
+        # 表情缩放到当前行高，演示表情大小与间距设置的实际效果
+        emoji_cache = {
+            name: img.scaled(
+                line_height, line_height,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            for name, img in self._emoji_images.items()
+        }
         builder = DanmakuLayoutBuilder(
             fm=fm,
-            emoji_cache={},
+            emoji_cache=emoji_cache,
             max_content_width=max(60, self.width() - 20),
             line_height=line_height,
             style=style,
         )
         y = 10
+        emoji_text = "".join(f"[{name}]" for name in self.EMOJI_NAMES)
         samples = [
-            ("普通弹幕 にじさんじ 日本語テスト", False),
-            ("メンバー限定 ハチを探しにいくぞ", True),
+            ("弹幕", False),       # 中文 · 普通样式
+            ("テスト", False),     # 日文 · 普通样式
+            ("sample", True),      # 英文 · 会员样式
+            (emoji_text, False),   # 连续表情
         ]
         for text, is_member in samples:
             event = DanmakuEvent(
@@ -273,7 +295,7 @@ class StylePreview(QWidget):
                 is_membership=is_member,
             )
             layout = builder.build(event)
-            layout.pre_render(font, {})
+            layout.pre_render(font, emoji_cache)
             painter.drawImage(10, y, layout.cached_image)
             y += layout.height + 8
         painter.end()
@@ -308,11 +330,6 @@ def _emoji_page() -> tuple[QWidget, QDoubleSpinBox, QDoubleSpinBox, QSpinBox]:
     spacing_spin.setFixedWidth(70)
     spacing_spin.setToolTip("表情间距（像素）")
     layout.addRow("间距", spacing_spin)
-
-    hint = QLabel("表情样式对普通与会员弹幕共同生效。")
-    hint.setObjectName("fieldHint")
-    hint.setWordWrap(True)
-    layout.addRow("", hint)
 
     return page, opacity_spin, size_spin, spacing_spin
 
