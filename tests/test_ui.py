@@ -679,3 +679,32 @@ def test_json_download_pages_hug_content(qapp):
     assert card3.height() < page3.height(), "下载卡片不应拉伸占满页面"
 
     window.close()
+
+
+def test_download_worker_converts_out_dir_to_path(qapp, tmp_path, monkeypatch):
+    """回归：界面传入字符串保存目录时，worker 应转为 Path 再调用下载。"""
+    from pathlib import Path
+
+    from danmakustudio.ui.worker import DownloadWorker
+
+    captured = {}
+
+    def fake_download_items(url, out_dir, fmt, **kwargs):
+        captured["out_dir"] = out_dir
+        return {"video": None, "chat": None, "thumbnail": None}
+
+    monkeypatch.setattr(
+        "danmakustudio.core.pipeline.download_items", fake_download_items
+    )
+
+    worker = DownloadWorker(
+        "http://example.com", "b", str(tmp_path),
+        want_video=True, want_chat=False, want_thumbnail=False,
+    )
+    results = []
+    worker.succeeded.connect(lambda r: results.append(r))
+    worker.run()  # 直接同步执行，不经 start()
+
+    assert isinstance(captured["out_dir"], Path)
+    assert captured["out_dir"] == tmp_path
+    assert results == [{"video": None, "chat": None, "thumbnail": None}]

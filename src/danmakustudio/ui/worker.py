@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import replace
+from pathlib import Path
 from time import perf_counter
 
 from loguru import logger
@@ -225,7 +226,7 @@ class DownloadWorker(QThread):
         super().__init__()
         self.url = url
         self.fmt = fmt
-        self.out_dir = out_dir
+        self.out_dir = Path(out_dir)   # 界面传入的可能是字符串
         self.want_video = want_video
         self.want_chat = want_chat
         self.want_thumbnail = want_thumbnail
