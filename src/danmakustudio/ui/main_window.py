@@ -18,21 +18,27 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from ..batch import BatchJob, collect_batch_jobs
+from ..batch import BatchJob, collect_batch_jobs, find_matching_subtitle
 from ..config.loader import config_to_yaml, load_config
-from ..config.models import EncodeMode, apply_style_overrides
+from ..config.models import DanmakuConfig, EncodeMode, apply_style_overrides
 from ..errors import DanmakuStudioError
+from ..input.parser import parse_subtitle
+from ..utils.validation import SUPPORTED_VIDEO_EXTS
 from ._shared import (
     config_dialog_start_location,
     format_duration,
@@ -44,6 +50,9 @@ from .file_picker import FileFolderPickerDialog
 from .style_panel import StylePanel
 from .theme import CheckMarkCheckBox, refresh_dynamic_style
 from .worker import BatchWorker
+
+# 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
+_TRIM_REF_WINDOW = 40
 
 
 class DownloadDialog(QDialog):
@@ -60,6 +69,10 @@ class DownloadDialog(QDialog):
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
         form.addRow("视频链接", self.url_edit)
+        self.format_edit = QLineEdit()
+        self.format_edit.setPlaceholderText("留空使用默认（优先 mp4）")
+        self.format_edit.setToolTip('yt-dlp 的 -f 格式字符串，例如 "bv*[height<=1080]+ba/b"')
+        form.addRow("下载格式", self.format_edit)
         layout.addLayout(form)
 
         self.video_check = QCheckBox("视频（直播回放）")
@@ -86,6 +99,70 @@ class DownloadDialog(QDialog):
 
     def url(self) -> str:
         return self.url_edit.text().strip()
+
+    def fmt(self) -> str:
+        """自定义 yt-dlp 下载格式；空字符串表示使用默认。"""
+        return self.format_edit.text().strip()
+
+
+class TrimReferenceDialog(QDialog):
+    """从前 40 条弹幕中参照选择：保留一条，其之前的弹幕全部删除。"""
+
+    def __init__(self, events, window_size: int = _TRIM_REF_WINDOW, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("删除开头弹幕 · 参照选择")
+        self.setMinimumWidth(620)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        hint = QLabel("选择要保留的一条（点选所在行），它之前的全部弹幕将被删除。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        rows = list(events)[:window_size]
+        self.table = QTableWidget(len(rows), 4, self)
+        self.table.setHorizontalHeaderLabels(["序号", "时间", "用户", "内容"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setWordWrap(False)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        for r, ev in enumerate(rows):
+            text = ev.text.replace("\n", " ").strip()
+            if len(text) > 60:
+                text = text[:60] + "…"
+            for col, value in enumerate((str(r + 1), f"{ev.time:.1f}s", ev.user, text)):
+                self.table.setItem(r, col, QTableWidgetItem(value))
+        self.table.selectRow(0)
+        layout.addWidget(self.table)
+
+        self.status_label = QLabel("")
+        self._update_status()
+        self.table.selectionModel().selectionChanged.connect(self._update_status)
+        layout.addWidget(self.status_label)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("保留所选并删除之前弹幕")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _update_status(self, *_args) -> None:
+        row = max(0, self.table.currentRow())
+        self.status_label.setText(f"将删除开头 {row} 条，保留第 {row + 1} 条作为新首条")
+
+    @property
+    def keep_index(self) -> int:
+        """用户选择保留的弹幕序号（1-based）。"""
+        return max(0, self.table.currentRow()) + 1
 
 
 class DanmakuStudioWindow(QWidget):
@@ -227,11 +304,51 @@ class DanmakuStudioWindow(QWidget):
         self.clip_duration_spin.setDecimals(0)
         self.clip_duration_spin.setValue(60.0)
         self.clip_duration_spin.setSuffix(" 秒")
-        self.clip_duration_spin.setToolTip("测试片段时长，从首条弹幕处开始")
+        self.clip_duration_spin.setToolTip("测试片段时长")
+        self.clip_start_check = QCheckBox("自定义起点")
+        self.clip_start_check.setToolTip(
+            "勾选后从指定的视频时间开始压制测试片段；不勾选则从首条弹幕处开始"
+        )
+        self.clip_start_spin = QDoubleSpinBox()
+        self.clip_start_spin.setRange(0.0, 36000.0)
+        self.clip_start_spin.setSingleStep(1.0)
+        self.clip_start_spin.setDecimals(1)
+        self.clip_start_spin.setValue(0.0)
+        self.clip_start_spin.setSuffix(" 秒")
+        self.clip_start_spin.setToolTip("测试片段起始时间（视频秒数）")
+        self.clip_start_check.setEnabled(False)
+        self.clip_start_spin.setEnabled(False)
+        self.test_clip_check.toggled.connect(self._update_clip_start_enabled)
+        self.clip_start_check.toggled.connect(self._update_clip_start_enabled)
         clip_row.addWidget(self.test_clip_check)
         clip_row.addWidget(self.clip_duration_spin)
+        clip_row.addWidget(self.clip_start_check)
+        clip_row.addWidget(self.clip_start_spin)
         clip_row.addStretch(1)
         options.addLayout(clip_row, 4, 1)
+
+        drop_label = QLabel("删除开头弹幕")
+        drop_label.setObjectName("fieldLabel")
+        options.addWidget(drop_label, 5, 0)
+        drop_row = QHBoxLayout()
+        drop_row.setSpacing(8)
+        self.drop_first_spin = QSpinBox()
+        self.drop_first_spin.setRange(0, 100000)
+        self.drop_first_spin.setValue(0)
+        self.drop_first_spin.setSuffix(" 条")
+        self.drop_first_spin.setToolTip(
+            "删除开头 N 条弹幕（如直播开始前发出的测试弹幕），0=不删除。"
+            "可点击「参照选择…」从前 40 条中指定保留哪一条。"
+        )
+        self.btn_drop_reference = QPushButton("参照选择…")
+        self.btn_drop_reference.setToolTip(
+            "列出弹幕文件的前 40 条（序号/时间/用户/内容），选择保留哪一条，其之前的弹幕全部删除"
+        )
+        self.btn_drop_reference.clicked.connect(self.choose_drop_first_reference)
+        drop_row.addWidget(self.drop_first_spin)
+        drop_row.addWidget(self.btn_drop_reference)
+        drop_row.addStretch(1)
+        options.addLayout(drop_row, 5, 1)
         settings_layout.addLayout(options)
 
         style_card = QFrame()
@@ -306,6 +423,11 @@ class DanmakuStudioWindow(QWidget):
         self.btn_download.setToolTip("用 yt-dlp 下载 YouTube 视频、实时弹幕 JSON 与封面（可勾选组合）")
         self.btn_download.clicked.connect(self.download_flow)
         actions.addWidget(self.btn_download)
+
+        self.btn_preview = QPushButton("生成预览图…")
+        self.btn_preview.setToolTip("选一个视频，用当前设置渲染弹幕预览 PNG（压制前确认效果）")
+        self.btn_preview.clicked.connect(self.generate_preview_images)
+        actions.addWidget(self.btn_preview)
 
         self.btn_start = QPushButton("开始压制  →")
         self.btn_start.setObjectName("primaryButton")
@@ -393,14 +515,139 @@ class DanmakuStudioWindow(QWidget):
             return
         self.style_panel.load_from(config)
 
-    def save_style_to_yaml(self) -> None:
-        """把界面样式合并进配置并保存为 YAML 文件。"""
-        path_text = self.config_edit.text().strip() or None
+    def _update_clip_start_enabled(self, *_args) -> None:
+        """自定义起点仅在与测试片段同时启用时可用。"""
+        start_enabled = self.test_clip_check.isChecked() and self.clip_start_check.isChecked()
+        self.clip_start_check.setEnabled(self.test_clip_check.isChecked())
+        self.clip_start_spin.setEnabled(start_enabled)
+
+    def choose_drop_first_reference(self) -> None:
+        """参照选择删除条数：从前 40 条里保留一条，之前的全部删除。"""
+        xml_path = self._reference_subtitle_path()
+        if xml_path is None:
+            return
         try:
-            config = load_config(path_text)
+            events = parse_subtitle(str(xml_path))
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "提示", f"弹幕文件读取失败: {e}")
+            return
+        if not events:
+            QMessageBox.warning(self, "提示", "弹幕文件没有任何事件。")
+            return
+
+        dialog = TrimReferenceDialog(events, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.drop_first_spin.setValue(max(0, dialog.keep_index - 1))
+
+    def _reference_subtitle_path(self):
+        """参照选择使用的弹幕文件：优先任务队列第一个，否则手动选择。"""
+        if self.pending_jobs:
+            subtitle = self.pending_jobs[0].subtitle_path
+            if not subtitle.exists():
+                QMessageBox.warning(self, "提示", f"弹幕文件不存在: {subtitle}")
+                return None
+            return subtitle
+        path_text, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择弹幕 XML/LRC",
+            self.last_dir,
+            "弹幕文件 (*.xml *.lrc);;所有文件 (*)",
+        )
+        return Path(path_text) if path_text else None
+
+    def generate_preview_images(self) -> None:
+        """生成预览图：选视频 → 匹配字幕 → 用当前界面设置渲染 PNG。"""
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
+            return
+
+        video_filter = (
+            "视频文件 (*" + " *".join(sorted(SUPPORTED_VIDEO_EXTS)) + ");;所有文件 (*)"
+        )
+        video_text, _ = QFileDialog.getOpenFileName(
+            self, "选择要预览的视频", self.last_dir, video_filter,
+        )
+        if not video_text:
+            return
+        video = Path(video_text)
+
+        subtitle = find_matching_subtitle(video)
+        if subtitle is None:
+            answer = QMessageBox.question(
+                self,
+                "未找到同名字幕",
+                f"未找到与 {video.name} 同名的 XML/LRC 字幕。\n是否手动选择弹幕文件？",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            subtitle_text, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择弹幕 XML/LRC",
+                str(video.parent),
+                "弹幕文件 (*.xml *.lrc);;所有文件 (*)",
+            )
+            if not subtitle_text:
+                return
+            subtitle = Path(subtitle_text)
+
+        try:
+            config = self._effective_config()
         except DanmakuStudioError as e:
             QMessageBox.warning(self, "提示", f"无法加载当前配置: {e}")
             return
+
+        self._remember_selection_dir([str(video)], str(video.parent))
+        self.append_log("")
+        self.append_log(f"生成预览图: {video.name} + {subtitle.name}")
+        self.setCursor(Qt.CursorShape.WaitCursor)
+        try:
+            from ..core.preview import generate_previews
+
+            paths = generate_previews(
+                str(video), str(subtitle), config,
+                out_dir=video.parent / "preview",
+                drop_first=int(self.drop_first_spin.value()),
+            )
+        except DanmakuStudioError as e:
+            QMessageBox.critical(self, "预览失败", f"[{e.category.value}] {e}")
+            return
+        except Exception as e:
+            QMessageBox.critical(self, "预览失败", str(e))
+            return
+        finally:
+            self.unsetCursor()
+
+        self.log.clear()
+        self.append_log("预览图已生成:")
+        for p in paths:
+            self.append_log(f"  {p}")
+        self.summary_label.setText(f"已生成 {len(paths)} 张预览图")
+        answer = QMessageBox.question(
+            self,
+            "打开预览图",
+            f"已生成 {len(paths)} 张预览图，保存在:\n{video.parent / 'preview'}\n\n是否打开查看？",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            for p in paths:
+                os.startfile(str(p))
+
+    def _set_controls_locked(self, locked: bool) -> None:
+        """任务运行期间锁定界面控件，结束后恢复。"""
+        for widget in (
+            self.btn_choose, self.btn_start, self.btn_config, self.encode_combo,
+            self.force_checkbox, self.btn_import_json, self.btn_download,
+            self.btn_preview, self.btn_drop_reference, self.drop_first_spin,
+            self.test_clip_check, self.clip_duration_spin,
+            self.clip_start_check, self.clip_start_spin,
+        ):
+            widget.setEnabled(not locked)
+        if not locked:
+            self._update_clip_start_enabled()
+
+    def _effective_config(self) -> DanmakuConfig:
+        """按界面当前设置构建有效配置（配置文件 + 样式覆盖 + 首条弹幕时间）。"""
+        config = load_config(self.config_edit.text().strip() or None)
         overrides = self.style_panel.style_overrides()
         if overrides is not None:
             config = apply_style_overrides(config, overrides)
@@ -412,6 +659,15 @@ class DanmakuStudioWindow(QWidget):
                     first_danmaku_at=self.first_danmaku_spin.value(),
                 ),
             )
+        return config
+
+    def save_style_to_yaml(self) -> None:
+        """把界面样式合并进配置并保存为 YAML 文件。"""
+        try:
+            config = self._effective_config()
+        except DanmakuStudioError as e:
+            QMessageBox.warning(self, "提示", f"无法加载当前配置: {e}")
+            return
 
         start_location = config_dialog_start_location(
             self.config_edit.text(),
@@ -617,7 +873,7 @@ class DanmakuStudioWindow(QWidget):
             from ..core.pipeline import _YTDLP_FORMAT, download_items
 
             result = download_items(
-                url, Path(out_dir), _YTDLP_FORMAT,
+                url, Path(out_dir), dialog.fmt() or _YTDLP_FORMAT,
                 want_video=want_video,
                 want_chat=want_chat,
                 want_thumbnail=want_thumbnail,
@@ -727,10 +983,22 @@ class DanmakuStudioWindow(QWidget):
             lines.append(f"首条弹幕时间：{self.first_danmaku_spin.value():g} 秒")
         else:
             lines.append("首条弹幕时间：不调整")
+        drop_first = int(self.drop_first_spin.value())
+        lines.append(
+            f"删除开头弹幕：前 {drop_first} 条" if drop_first else "删除开头弹幕：不删除"
+        )
         ffmpeg_args = self.ffmpeg_args_edit.text().strip()
         lines.append(f"FFmpeg 自定义参数：{ffmpeg_args or '（无）'}")
         if self.test_clip_check.isChecked():
-            lines.append(f"只导出测试片段：{self.clip_duration_spin.value():g} 秒")
+            if self.clip_start_check.isChecked():
+                lines.append(
+                    f"只导出测试片段：从 {self.clip_start_spin.value():g} 秒开始，"
+                    f"时长 {self.clip_duration_spin.value():g} 秒"
+                )
+            else:
+                lines.append(
+                    f"只导出测试片段：从首条弹幕处开始，时长 {self.clip_duration_spin.value():g} 秒"
+                )
         else:
             lines.append("只导出测试片段：否（压制完整视频）")
 
@@ -757,13 +1025,7 @@ class DanmakuStudioWindow(QWidget):
 
     def start_worker(self, jobs: list[BatchJob]) -> None:
         config_path = self.config_edit.text().strip() or None
-        self.btn_choose.setEnabled(False)
-        self.btn_start.setEnabled(False)
-        self.btn_config.setEnabled(False)
-        self.encode_combo.setEnabled(False)
-        self.force_checkbox.setEnabled(False)
-        self.btn_import_json.setEnabled(False)
-        self.btn_download.setEnabled(False)
+        self._set_controls_locked(True)
         self.summary_label.setText(f"处理中: 0/{len(jobs)}")
         self.progress_bar.setValue(0)
         self._set_status("正在处理", "busy")
@@ -775,6 +1037,7 @@ class DanmakuStudioWindow(QWidget):
             if self.first_danmaku_check.isChecked()
             else None
         )
+        test_clip = self.test_clip_check.isChecked()
         self.worker = BatchWorker(
             jobs=jobs,
             encode_mode=self.encode_combo.currentData(),
@@ -783,8 +1046,14 @@ class DanmakuStudioWindow(QWidget):
             style_overrides=self.style_panel.style_overrides(),
             first_danmaku_at=first_danmaku_at,
             ffmpeg_args=self.ffmpeg_args_edit.text().strip() or None,
-            test_clip=self.test_clip_check.isChecked(),
+            test_clip=test_clip,
             clip_duration=self.clip_duration_spin.value(),
+            drop_first=int(self.drop_first_spin.value()),
+            clip_start=(
+                self.clip_start_spin.value()
+                if test_clip and self.clip_start_check.isChecked()
+                else None
+            ),
         )
         self.worker.log.connect(self.append_log)
         self.worker.progress.connect(self.on_worker_progress)
@@ -814,12 +1083,7 @@ class DanmakuStudioWindow(QWidget):
         skipped: int,
         failed: int,
     ) -> None:
-        self.btn_choose.setEnabled(True)
-        self.btn_config.setEnabled(True)
-        self.encode_combo.setEnabled(True)
-        self.force_checkbox.setEnabled(True)
-        self.btn_import_json.setEnabled(True)
-        self.btn_download.setEnabled(True)
+        self._set_controls_locked(False)
         self.btn_start.setEnabled(False)
         self.pending_jobs = []
         self.worker = None

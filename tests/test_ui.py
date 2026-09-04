@@ -14,7 +14,11 @@ from danmakustudio.config.models import (
 )
 from danmakustudio.ui._shared import config_dialog_start_location
 from danmakustudio.ui.file_picker import FileFolderPickerDialog
-from danmakustudio.ui.main_window import DanmakuStudioWindow
+from danmakustudio.ui.main_window import (
+    DanmakuStudioWindow,
+    DownloadDialog,
+    TrimReferenceDialog,
+)
 from danmakustudio.ui.style_panel import StylePanel
 from danmakustudio.ui.theme import APP_STYLESHEET, CheckMarkCheckBox, apply_theme
 
@@ -391,3 +395,170 @@ def test_style_panel_rows_do_not_overlap(qapp):
     assert common_bottom <= size_top, "公共行重叠: 字体类型 与 字体大小"
 
     window.close()
+
+
+# =============================================================================
+# 功能同步：删除开头弹幕 / 测试片段起点 / 预览图 / 下载格式
+# =============================================================================
+
+
+def test_main_window_drop_first_and_clip_start_defaults(qapp):
+    """删除开头弹幕默认 0；自定义起点仅在测试片段开启后可用。"""
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+
+    assert window.drop_first_spin.value() == 0
+    assert window.drop_first_spin.minimum() == 0
+    assert window.drop_first_spin.maximum() == 100000
+    assert window.btn_drop_reference.isEnabled()
+
+    assert not window.test_clip_check.isChecked()
+    assert not window.clip_start_check.isEnabled()
+    assert not window.clip_start_spin.isEnabled()
+
+    window.test_clip_check.setChecked(True)
+    assert window.clip_start_check.isEnabled()
+    assert not window.clip_start_spin.isEnabled()
+
+    window.clip_start_check.setChecked(True)
+    assert window.clip_start_spin.isEnabled()
+
+    window.test_clip_check.setChecked(False)
+    assert not window.clip_start_check.isEnabled()
+    assert not window.clip_start_spin.isEnabled()
+
+    window.close()
+
+
+def test_main_window_effective_config_applies_overrides(qapp, tmp_path):
+    """_effective_config 应合并配置文件、样式覆盖与首条弹幕时间。"""
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+
+    cfg_file = tmp_path / "c.yaml"
+    cfg_file.write_text("style:\n  font_size: 33\n", encoding="utf-8")
+    window.config_edit.setText(str(cfg_file))
+    window.style_panel.custom_check.setChecked(True)
+    window.style_panel.font_size_spin.setValue(44)
+    window.first_danmaku_check.setChecked(True)
+    window.first_danmaku_spin.setValue(3.5)
+
+    config = window._effective_config()
+    assert config.style.font_size == 44
+    assert config.animation.first_danmaku_at == 3.5
+
+    window.first_danmaku_check.setChecked(False)
+    config = window._effective_config()
+    assert config.animation.first_danmaku_at is None  # tmp 配置未设置 → 内置默认
+
+    window.close()
+
+
+def _write_numbered_xml(tmp_path, count=5):
+    xml = tmp_path / "chat.xml"
+    xml.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<i>\n'
+        + "".join(
+            f'  <d p="{i},1,25,16777215,0,0,0,0" user="u{i}">弹幕{i}</d>\n'
+            for i in range(1, count + 1)
+        )
+        + "</i>\n",
+        encoding="utf-8",
+    )
+    return xml
+
+
+def test_trim_reference_dialog_returns_keep_index(qapp, tmp_path):
+    from danmakustudio.input.parser import parse_subtitle
+
+    events = parse_subtitle(str(_write_numbered_xml(tmp_path)))
+
+    apply_theme(qapp)
+    dialog = TrimReferenceDialog(events)
+
+    assert dialog.table.rowCount() == 5
+    dialog.table.selectRow(2)
+    assert dialog.keep_index == 3
+    assert "将删除开头 2 条" in dialog.status_label.text()
+    assert "保留第 3 条" in dialog.status_label.text()
+
+    dialog.close()
+
+
+def test_trim_reference_dialog_caps_at_window(qapp, tmp_path):
+    from danmakustudio.input.parser import parse_subtitle
+    from danmakustudio.ui.main_window import _TRIM_REF_WINDOW
+
+    events = parse_subtitle(str(_write_numbered_xml(tmp_path, count=_TRIM_REF_WINDOW + 10)))
+
+    apply_theme(qapp)
+    dialog = TrimReferenceDialog(events)
+
+    assert dialog.table.rowCount() == _TRIM_REF_WINDOW
+    dialog.close()
+
+
+def test_main_window_drop_reference_adopts_selection(qapp, tmp_path, monkeypatch):
+    """参照选择确认后应把 drop_first 设置为「所选序号 - 1」。"""
+    from PySide6.QtWidgets import QDialog
+
+    from danmakustudio.batch import BatchJob
+
+    subtitle = _write_numbered_xml(tmp_path)
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+    window.pending_jobs = [
+        BatchJob(
+            video_path=tmp_path / "v.mp4",
+            subtitle_path=subtitle,
+            output_path=tmp_path / "out.mp4",
+        )
+    ]
+
+    class FakeDialog:
+        def __init__(self, events, parent=None):
+            self.events = events
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        @property
+        def keep_index(self):
+            return 4
+
+    monkeypatch.setattr(
+        "danmakustudio.ui.main_window.TrimReferenceDialog", FakeDialog
+    )
+
+    window.choose_drop_first_reference()
+
+    assert window.drop_first_spin.value() == 3
+    window.close()
+
+
+def test_batch_worker_accepts_drop_first_and_clip_start(qapp):
+    from danmakustudio.ui.worker import BatchWorker
+
+    worker = BatchWorker(
+        jobs=[],
+        encode_mode=EncodeMode.AUTO,
+        config_path=None,
+        force=False,
+        drop_first=7,
+        clip_start=12.5,
+        test_clip=True,
+        clip_duration=30,
+    )
+    assert worker.drop_first == 7
+    assert worker.clip_start == 12.5
+
+
+def test_download_dialog_format_field(qapp):
+    apply_theme(qapp)
+    dialog = DownloadDialog()
+
+    assert dialog.fmt() == ""
+    dialog.format_edit.setText("  bv*[height<=720]+ba/b  ")
+    assert dialog.fmt() == "bv*[height<=720]+ba/b"
+
+    dialog.close()

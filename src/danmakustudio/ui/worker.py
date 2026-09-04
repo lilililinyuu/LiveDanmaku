@@ -61,6 +61,8 @@ class BatchWorker(QThread):
         ffmpeg_args: str | None = None,
         test_clip: bool = False,
         clip_duration: float = 60.0,
+        drop_first: int = 0,
+        clip_start: float | None = None,
     ):
         super().__init__()
         self.jobs = jobs
@@ -72,6 +74,8 @@ class BatchWorker(QThread):
         self.ffmpeg_args = ffmpeg_args
         self.test_clip = test_clip
         self.clip_duration = clip_duration
+        self.drop_first = drop_first
+        self.clip_start = clip_start
 
     def run(self) -> None:
         old_stdout = sys.stdout
@@ -110,8 +114,15 @@ class BatchWorker(QThread):
                     ),
                 )
                 self.log.emit(f"自定义参数: {self.ffmpeg_args}")
+            if self.drop_first:
+                self.log.emit(f"删除开头弹幕: 前 {self.drop_first} 条")
             if self.test_clip:
-                self.log.emit(f"测试片段模式: {self.clip_duration} 秒")
+                start_desc = (
+                    f"从 {self.clip_start:g} 秒" if self.clip_start is not None else "从首条弹幕处"
+                )
+                self.log.emit(
+                    f"测试片段模式: {start_desc}开始 {self.clip_duration:g} 秒"
+                )
             self.log.emit(f"总计 {total} 个任务")
             if self.config_path:
                 self.log.emit(f"配置文件: {self.config_path}")
@@ -123,7 +134,7 @@ class BatchWorker(QThread):
                 job_started_at = perf_counter()
                 if self.test_clip:
                     job_output = job.video_path.parent / f"{job.video_path.stem}.test-clip.mp4"
-                    clip = (None, self.clip_duration)
+                    clip = (self.clip_start, self.clip_duration)
                 else:
                     job_output = job.output_path
                     clip = None
@@ -158,6 +169,7 @@ class BatchWorker(QThread):
                         force=self.force,
                         progress_callback=report_progress,
                         clip=clip,
+                        drop_first=self.drop_first,
                     )
                     self.log.emit("状态: 开始压制")
                     burner.run()
