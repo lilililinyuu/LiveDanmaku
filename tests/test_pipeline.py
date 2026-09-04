@@ -146,3 +146,44 @@ def test_download_items_nonzero_exit(monkeypatch, tmp_path):
             "http://example.com", tmp_path, "b",
             want_video=True, want_chat=False, want_thumbnail=False,
         )
+
+
+def test_download_items_chat_fallback_from_dir(monkeypatch, tmp_path):
+    """stdout 未打印弹幕 JSON 路径时，应从下载目录的新增文件回退查找。"""
+
+    def fake_popen(cmd, **kwargs):
+        # 模拟 yt-dlp：只打印视频路径，弹幕 JSON 由其直接写入目录
+        chat = tmp_path / "【直播】x.live_chat.json"
+        chat.write_text("{}", encoding="utf-8")
+        return _FakePopen([str(tmp_path / "【直播】x.mp4") + "\n"])
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    result = download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=True, want_chat=True, want_thumbnail=False,
+    )
+
+    assert result["video"] is not None and result["video"].suffix == ".mp4"
+    assert result["chat"] is not None
+    assert result["chat"].name.endswith(".live_chat.json")
+
+
+def test_download_items_chat_fallback_prefers_plain_json(monkeypatch, tmp_path):
+    """无 .live_chat 命名时回退到普通 .json 新增文件。"""
+
+    def fake_popen(cmd, **kwargs):
+        (tmp_path / "x.json").write_text("{}", encoding="utf-8")
+        return _FakePopen([])
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    result = download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=False, want_chat=True, want_thumbnail=False,
+    )
+
+    assert result["chat"] is not None
+    assert result["chat"].name == "x.json"

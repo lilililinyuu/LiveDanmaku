@@ -135,6 +135,13 @@ def download_items(
 
     video, chat = parse_ytdlp_paths(lines)
 
+    # --print after_move:filepath 只打印视频路径，不打印随视频写入的
+    # 弹幕 JSON；stdout 中找不到时从下载目录的新增文件回退查找
+    if want_chat and chat is None:
+        chat = _find_new_file(out_dir, before, ".live_chat.json", ".json")
+        if chat is not None:
+            logger.info("从下载目录找到弹幕 JSON: {}", chat.name)
+
     thumbnail: Path | None = None
     if want_thumbnail:
         after = {p for p in out_dir.iterdir() if p.is_file()}
@@ -149,6 +156,33 @@ def download_items(
         raise DanmakuStudioError("yt-dlp 输出中未找到弹幕 JSON，请检查下载结果。")
 
     return {"video": video, "chat": chat, "thumbnail": thumbnail}
+
+
+def _find_new_file(
+    out_dir: Path,
+    before: set[Path],
+    *preferred_suffixes: str,
+) -> Path | None:
+    """在下载目录的"新增文件"（下载前不存在）里按后缀优先级查找。
+
+    后缀按传入顺序匹配：先找以 preferred_suffixes[0] 结尾的文件，
+    再找 [1]……找到即返回（多个候选时取最新的一个）。
+    """
+    try:
+        after = {p for p in out_dir.iterdir() if p.is_file()}
+    except OSError as e:
+        logger.warning("无法扫描下载目录: {} ({})", out_dir, e)
+        return None
+    new_files = sorted(
+        after - before,
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for suffix in preferred_suffixes:
+        for path in new_files:
+            if path.name.lower().endswith(suffix):
+                return path
+    return None
 
 
 def _largest_thumbnail_to_png(thumbs: list[Path]) -> Path:
