@@ -100,3 +100,13 @@ def test_convert_chat_json_empty_raises(tmp_path):
 
     with pytest.raises(ValueError, match="未提取到任何弹幕消息"):
         convert_chat_json(src, tmp_path / "out.xml")
+
+
+def test_default_xml_path_for_strips_live_chat():
+    """yt-dlp 的 xxx.live_chat.json 应映射为 xxx.xml；普通 json 原后缀替换。"""
+    from pathlib import Path
+
+    from danmakustudio.input.chat2xml import default_xml_path_for
+
+    assert default_xml_path_for("a/直播.live_chat.json") == Path("a/直播.xml")
+    assert default_xml_path_for("a/chat.json") == Path("a/chat.xml")

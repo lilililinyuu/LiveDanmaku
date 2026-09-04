@@ -76,12 +76,16 @@ def find_matching_subtitle(video_path: Path) -> Path | None:
     """查找同名字幕文件。
 
     优先选择同目录下同名的 XML；只有不存在 XML 时才选择 LRC。
+    精确同名都不存在时，退而匹配 yt-dlp 导出的 `xxx.live_chat.xml/lrc`
+    命名（对应视频 `xxx`）。
     """
     if not video_path.is_file():
         return None
 
     stem_key = video_path.stem.lower()
-    candidates: dict[str, list[Path]] = {ext: [] for ext in SUPPORTED_BATCH_SUBTITLE_EXTS}
+    live_chat_key = f"{stem_key}.live_chat"
+    exact: dict[str, list[Path]] = {ext: [] for ext in SUPPORTED_BATCH_SUBTITLE_EXTS}
+    live_chat: dict[str, list[Path]] = {ext: [] for ext in SUPPORTED_BATCH_SUBTITLE_EXTS}
 
     try:
         siblings = list(video_path.parent.iterdir())
@@ -97,15 +101,18 @@ def find_matching_subtitle(video_path: Path) -> Path | None:
             logger.warning("无法访问字幕候选文件，已跳过: {} ({})", path, e)
             continue
         suffix = path.suffix.lower()
-        if suffix not in candidates:
+        if suffix not in exact:
             continue
         if path.stem.lower() == stem_key:
-            candidates[suffix].append(path)
+            exact[suffix].append(path)
+        elif path.stem.lower() == live_chat_key:
+            live_chat[suffix].append(path)
 
-    for suffix in SUPPORTED_BATCH_SUBTITLE_EXTS:
-        matches = sorted(candidates[suffix], key=lambda path: path.name.lower())
-        if matches:
-            return matches[0]
+    for tier in (exact, live_chat):
+        for suffix in SUPPORTED_BATCH_SUBTITLE_EXTS:
+            matches = sorted(tier[suffix], key=lambda path: path.name.lower())
+            if matches:
+                return matches[0]
 
     return None
 

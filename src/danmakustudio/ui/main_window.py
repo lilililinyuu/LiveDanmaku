@@ -8,7 +8,6 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -52,7 +51,7 @@ from ._shared import (
 from .file_picker import FileFolderPickerDialog
 from .style_panel import StylePanel
 from .theme import CheckMarkCheckBox, refresh_dynamic_style
-from .worker import BatchWorker
+from .worker import BatchWorker, DownloadWorker
 
 # 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
 _TRIM_REF_WINDOW = 40
@@ -128,6 +127,7 @@ class DanmakuStudioWindow(QWidget):
         self.resize(1120, 780)
         self.setMinimumSize(900, 640)
         self.worker: BatchWorker | None = None
+        self.download_worker: DownloadWorker | None = None
         self.pending_jobs: list[BatchJob] = []
         self.sidebar_collapsed = False
         self.last_dir = str(get_app_dir())
@@ -217,7 +217,7 @@ class DanmakuStudioWindow(QWidget):
         options.addWidget(first_label, 2, 0)
         first_row = QHBoxLayout()
         first_row.setSpacing(8)
-        self.first_danmaku_check = QCheckBox("调整")
+        self.first_danmaku_check = CheckMarkCheckBox("调整")
         self.first_danmaku_check.setToolTip("勾选后把第一条弹幕对齐到指定视频时间")
         self.first_danmaku_spin = QDoubleSpinBox()
         self.first_danmaku_spin.setRange(0.0, 3600.0)
@@ -250,7 +250,7 @@ class DanmakuStudioWindow(QWidget):
         options.addWidget(clip_label, 4, 0)
         clip_row = QHBoxLayout()
         clip_row.setSpacing(8)
-        self.test_clip_check = QCheckBox("只导出测试片段")
+        self.test_clip_check = CheckMarkCheckBox("只导出测试片段")
         self.test_clip_check.setToolTip("勾选后每个任务只压制一个片段，用于先确认效果")
         self.clip_duration_spin = QDoubleSpinBox()
         self.clip_duration_spin.setRange(1.0, 3600.0)
@@ -259,7 +259,7 @@ class DanmakuStudioWindow(QWidget):
         self.clip_duration_spin.setValue(60.0)
         self.clip_duration_spin.setSuffix(" 秒")
         self.clip_duration_spin.setToolTip("测试片段时长")
-        self.clip_start_check = QCheckBox("自定义起点")
+        self.clip_start_check = CheckMarkCheckBox("自定义起点")
         self.clip_start_check.setToolTip(
             "勾选后从指定的视频时间开始压制测试片段；不勾选则从首条弹幕处开始"
         )
@@ -419,6 +419,12 @@ class DanmakuStudioWindow(QWidget):
         self.style_panel.save_state()
         super().closeEvent(event)
 
+    def _busy(self) -> bool:
+        """是否有批量压制或下载任务正在后台运行。"""
+        return (self.worker is not None and self.worker.isRunning()) or (
+            self.download_worker is not None and self.download_worker.isRunning()
+        )
+
     def _set_status(self, text: str, state: str) -> None:
         self.status_badge.setText(text)
         self.status_badge.setProperty("state", state)
@@ -566,10 +572,18 @@ class DanmakuStudioWindow(QWidget):
         action_row.addWidget(self.btn_json_convert)
         self.btn_highlights = QPushButton("分析高潮点")
         self.btn_highlights.setToolTip(
-            "按弹幕发送频率分析聊天 JSON，找出最热闹的时间段（高潮点）"
+            "按弹幕发送频率分析聊天 JSON：高潮点 = 相对前后区段明显更密集，"
+            "单段最长 5 分钟"
         )
         self.btn_highlights.clicked.connect(self.analyze_chat_highlights)
         action_row.addWidget(self.btn_highlights)
+        self.highlight_top_spin = QSpinBox()
+        self.highlight_top_spin.setRange(1, 20)
+        self.highlight_top_spin.setValue(5)
+        self.highlight_top_spin.setPrefix("前 ")
+        self.highlight_top_spin.setSuffix(" 名")
+        self.highlight_top_spin.setToolTip("统计弹幕最密集的前多少个时间段")
+        action_row.addWidget(self.highlight_top_spin)
         action_row.addStretch(1)
         layout.addLayout(action_row)
         return self._hug_content_page(card)
@@ -613,11 +627,11 @@ class DanmakuStudioWindow(QWidget):
         form.addRow("下载格式", self.dl_format_edit)
         content_row = QHBoxLayout()
         content_row.setSpacing(12)
-        self.dl_video_check = QCheckBox("视频（直播回放）")
+        self.dl_video_check = CheckMarkCheckBox("视频（直播回放）")
         self.dl_video_check.setChecked(True)
-        self.dl_chat_check = QCheckBox("实时弹幕（live_chat JSON）")
+        self.dl_chat_check = CheckMarkCheckBox("实时弹幕（live_chat JSON）")
         self.dl_chat_check.setChecked(True)
-        self.dl_thumbnail_check = QCheckBox("封面（转 PNG）")
+        self.dl_thumbnail_check = CheckMarkCheckBox("封面（转 PNG）")
         for check in (self.dl_video_check, self.dl_chat_check, self.dl_thumbnail_check):
             content_row.addWidget(check)
         content_row.addStretch(1)
@@ -685,7 +699,7 @@ class DanmakuStudioWindow(QWidget):
 
     def generate_preview_images(self) -> None:
         """生成预览图：选视频 → 匹配字幕 → 用当前界面设置渲染 PNG。"""
-        if self.worker is not None and self.worker.isRunning():
+        if self._busy():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
             return
 
@@ -851,7 +865,7 @@ class DanmakuStudioWindow(QWidget):
             self.log.append("")
 
     def choose_items(self) -> None:
-        if self.worker is not None and self.worker.isRunning():
+        if self._busy():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
             return
 
@@ -930,7 +944,7 @@ class DanmakuStudioWindow(QWidget):
 
     def _selected_chat_json(self):
         """校验并返回页面选择的聊天 JSON；无效时弹窗提示并返回 None。"""
-        if self.worker is not None and self.worker.isRunning():
+        if self._busy():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
             return None
         path_text = self.json_path_edit.text().strip()
@@ -964,15 +978,19 @@ class DanmakuStudioWindow(QWidget):
             QMessageBox.warning(self, "提示", "未从聊天 JSON 中提取到任何弹幕消息。")
             return
 
-        intervals = analyze_highlights(times)
+        top = self.highlight_top_spin.value()
+        intervals = analyze_highlights(times, top=top)
         duration = format_clock(times[-1])
         self.log.clear()
         self.append_log(f"直播高潮点分析: {json_path.name}")
         self.append_log(f"  弹幕总数 {len(times)} 条，时间跨度 {duration}（相对首条弹幕）")
         if not intervals:
-            self.append_log("  未发现明显的弹幕密集段（发送频率较均匀）。")
+            self.append_log("  未发现高潮点（没有相对前后区段明显更密集的时段）。")
         else:
-            self.append_log("  弹幕最密集的时间段（按窗口 10 秒统计，取前 5 名）:")
+            self.append_log(
+                "  高潮时间段（10 秒窗口；相对前后明显更密集，单段最长 5 分钟，"
+                f"取前 {top} 名）:"
+            )
             for rank, it in enumerate(intervals, start=1):
                 self.append_log(
                     f"    #{rank}  {format_clock(it.start)} – {format_clock(it.end)}"
@@ -984,11 +1002,12 @@ class DanmakuStudioWindow(QWidget):
 
     def _convert_chat_json_and_adopt(self, json_path: Path) -> None:
         """转换聊天 JSON 为 XML；检测到同名视频时询问加入任务队列。"""
-        xml_out = json_path.with_suffix(".xml")
+        from ..input.chat2xml import convert_chat_json, default_xml_path_for
+
+        # xxx.live_chat.json → xxx.xml（去掉 .live_chat 中缀，保证字幕可匹配）
+        xml_out = default_xml_path_for(json_path)
         self.setCursor(Qt.CursorShape.WaitCursor)
         try:
-            from ..input.chat2xml import convert_chat_json
-
             stats = convert_chat_json(str(json_path), xml_out, lead_in=0.0)
         except Exception as e:
             QMessageBox.critical(self, "转换失败", f"JSON 转 XML 失败:\n{e}")
@@ -1042,8 +1061,8 @@ class DanmakuStudioWindow(QWidget):
         return self.dl_format_edit.text().strip()
 
     def start_download(self) -> None:
-        """按页面设置用 yt-dlp 下载视频 / 弹幕 / 封面。"""
-        if self.worker is not None and self.worker.isRunning():
+        """按页面设置在后台用 yt-dlp 下载视频 / 弹幕 / 封面。"""
+        if self._busy():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
             return
         url = self.dl_url_edit.text().strip()
@@ -1056,48 +1075,39 @@ class DanmakuStudioWindow(QWidget):
         if not (want_video or want_chat or want_thumbnail):
             QMessageBox.warning(self, "提示", "请至少勾选一项要下载的内容。")
             return
+
+        from ..core.pipeline import _YTDLP_FORMAT
+
         out_dir = self.dl_dir_edit.text().strip() or self.last_dir
-        self._run_download(
-            url, self._download_format(), out_dir,
+        self.btn_download_start.setEnabled(False)
+        self._set_status("正在下载", "busy")
+        self.append_log("")
+        self.append_log(f"开始下载: {url}（后台进行，进度见下方日志）")
+        self.download_worker = DownloadWorker(
+            url,
+            self._download_format() or _YTDLP_FORMAT,
+            out_dir,
             want_video=want_video,
             want_chat=want_chat,
             want_thumbnail=want_thumbnail,
         )
+        self.download_worker.log.connect(self.append_log)
+        self.download_worker.succeeded.connect(self._on_download_succeeded)
+        self.download_worker.failed.connect(self._on_download_failed)
+        self.download_worker.start()
 
-    def _run_download(
-        self,
-        url: str,
-        fmt: str,
-        out_dir_text: str,
-        *,
-        want_video: bool,
-        want_chat: bool,
-        want_thumbnail: bool,
-    ) -> None:
-        """执行下载并处理后续（转 XML / 加入队列 / 打开封面）。"""
-        out_dir = Path(out_dir_text)
-        self.append_log(f"开始下载: {url}（请稍候，大视频耗时较长）")
-        self.setCursor(Qt.CursorShape.WaitCursor)
-        try:
-            from ..core.pipeline import _YTDLP_FORMAT, download_items
+    def _on_download_succeeded(self, result: dict) -> None:
+        """下载完成（主线程）：展示结果并处理后续（转 XML / 加入队列 / 打开封面）。"""
+        self.btn_download_start.setEnabled(True)
+        self._set_status("等待任务", "idle")
+        out_dir = (
+            Path(self.download_worker.out_dir) if self.download_worker else Path.cwd()
+        )
 
-            result = download_items(
-                url, out_dir, fmt or _YTDLP_FORMAT,
-                want_video=want_video,
-                want_chat=want_chat,
-                want_thumbnail=want_thumbnail,
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "下载失败", str(e))
-            return
-        finally:
-            self.unsetCursor()
+        video = result.get("video")
+        chat = result.get("chat")
+        thumbnail = result.get("thumbnail")
 
-        video = result["video"]
-        chat = result["chat"]
-        thumbnail = result["thumbnail"]
-
-        self.log.clear()
         self.append_log("下载完成:")
         if video is not None:
             self.append_log(f"  视频: {video.name}")
@@ -1146,6 +1156,13 @@ class DanmakuStudioWindow(QWidget):
             if answer == QMessageBox.StandardButton.Yes:
                 os.startfile(str(thumbnail))
 
+    def _on_download_failed(self, message: str) -> None:
+        """下载失败（主线程）：恢复按钮并提示。"""
+        self.btn_download_start.setEnabled(True)
+        self._set_status("下载失败", "error")
+        self.append_log(f"下载失败: {message}")
+        QMessageBox.critical(self, "下载失败", message)
+
     def _remember_selection_dir(self, selected: list[str], fallback: str) -> None:
         selected_for_last_dir = selected[0] if selected else fallback
         current_dir = (
@@ -1158,7 +1175,7 @@ class DanmakuStudioWindow(QWidget):
             self._save_last_dir(self.last_dir)
 
     def start_pending_jobs(self) -> None:
-        if self.worker is not None and self.worker.isRunning():
+        if self._busy():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
             return
 

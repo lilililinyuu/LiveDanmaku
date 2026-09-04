@@ -46,6 +46,7 @@ from ..input.event import DanmakuEvent
 from ..render.assets import _RESOURCE_ROOT
 from ..render.layout_builder import DanmakuLayoutBuilder
 from ._shared import gui_style_path
+from .theme import CheckMarkCheckBox
 
 
 def _opacity_spin() -> QDoubleSpinBox:
@@ -109,8 +110,8 @@ class ColorButton(QPushButton):
 
 
 def _bare_check(tooltip: str) -> QCheckBox:
-    """无文字的纯打勾开关。"""
-    check = QCheckBox()
+    """无文字的纯打勾开关（带主题勾号绘制）。"""
+    check = CheckMarkCheckBox()
     check.setToolTip(tooltip)
     check.setFixedWidth(22)
     return check
@@ -119,7 +120,11 @@ def _bare_check(tooltip: str) -> QCheckBox:
 class TextStyleControls(QWidget):
     """一组 TextStyle 的编辑控件（普通/会员页共用）。"""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        color_row_extra: QWidget | None = None,
+    ):
         super().__init__(parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -138,6 +143,8 @@ class TextStyleControls(QWidget):
         text_row.addWidget(QLabel("不透明度"))
         text_row.addWidget(self.opacity_spin)
         text_row.addStretch(1)
+        if color_row_extra is not None:
+            text_row.addWidget(color_row_extra)
         layout.addRow("颜色", text_row)
 
         outline_row = QHBoxLayout()
@@ -214,7 +221,7 @@ class StylePreview(QWidget):
 
     DEFAULT_BG = "#808080"
     # 预览用表情（取自 assets/emoji），连续 3 个以展示大小与间距效果
-    EMOJI_NAMES = ("_LOL草", "_RedPen", "_Surprise驚き")
+    EMOJI_NAMES = ("_LOVEラブ", "_nagi凪", "_ペンライト")
 
     def __init__(self, panel: StylePanel, parent: QWidget | None = None):
         super().__init__(parent)
@@ -297,7 +304,8 @@ class StylePreview(QWidget):
             layout = builder.build(event)
             layout.pre_render(font, emoji_cache)
             painter.drawImage(10, y, layout.cached_image)
-            y += layout.height + 8
+            # 行间仅留 2px 间隙（缓存图已含阴影预留），预览更紧凑
+            y += layout.height + 2
         painter.end()
 
 
@@ -345,7 +353,7 @@ class StylePanel(QWidget):
 
         header_row = QHBoxLayout()
         header_row.setSpacing(8)
-        self.custom_check = QCheckBox("使用自定义样式（覆盖配置文件）")
+        self.custom_check = CheckMarkCheckBox("使用自定义样式（覆盖配置文件）")
         self.custom_check.toggled.connect(self._update_enabled)
         header_row.addWidget(self.custom_check)
         header_row.addStretch(1)
@@ -376,17 +384,28 @@ class StylePanel(QWidget):
         font_row = QHBoxLayout()
         font_row.setSpacing(8)
         font_row.addWidget(self.font_combo)
-        self.font_lock_check = QCheckBox("锁定")
+        self.font_lock_check = CheckMarkCheckBox("锁定")
         self.font_lock_check.setToolTip("锁定后字体类型不可改动，防止误触")
         self.font_lock_check.toggled.connect(self._update_font_lock)
         font_row.addWidget(self.font_lock_check)
         common.addRow("字体类型", font_row)
+
+        size_row = QHBoxLayout()
+        size_row.setSpacing(8)
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(8, 72)
         self.font_size_spin.setValue(25)
         self.font_size_spin.setMinimumHeight(38)
         self.font_size_spin.setFixedWidth(80)
-        common.addRow("字体大小 (pt)", self.font_size_spin)
+        size_row.addWidget(self.font_size_spin)
+        size_row.addStretch(1)
+        size_row.addWidget(QLabel("预览背景"))
+        self.preview_bg_btn = ColorButton()
+        self.preview_bg_btn.setToolTip("预览区背景颜色（仅界面显示，不影响压制输出）")
+        self.preview_bg_btn.set_color_hex(StylePreview.DEFAULT_BG)
+        self.preview_bg_btn.changed.connect(self._apply_preview_bg)
+        size_row.addWidget(self.preview_bg_btn)
+        common.addRow("字体大小 (pt)", size_row)
         content_layout.addLayout(common)
 
         self.tabs = QTabWidget()
@@ -397,14 +416,11 @@ class StylePanel(QWidget):
         member_layout = QVBoxLayout(member_page)
         member_layout.setContentsMargins(0, 0, 0, 0)
         member_layout.setSpacing(8)
-        member_buttons = QHBoxLayout()
         self.copy_member_btn = QPushButton("复制普通样式")
         self.copy_member_btn.setToolTip("把普通文本页的样式复制到会员页")
         self.copy_member_btn.clicked.connect(self.copy_text_to_member)
-        member_buttons.addWidget(self.copy_member_btn)
-        member_buttons.addStretch(1)
-        member_layout.addLayout(member_buttons)
-        self.member_controls = TextStyleControls()
+        # 复制按钮放在会员页「颜色」行的右侧，便于对照调整
+        self.member_controls = TextStyleControls(color_row_extra=self.copy_member_btn)
         member_layout.addWidget(self.member_controls)
         self.tabs.addTab(member_page, "会员文本")
 
@@ -427,16 +443,6 @@ class StylePanel(QWidget):
         preview_layout.addWidget(preview_title)
         self.preview = StylePreview(self)
         preview_layout.addWidget(self.preview, 1)
-        bg_row = QHBoxLayout()
-        bg_row.setSpacing(8)
-        bg_row.addWidget(QLabel("预览背景"))
-        self.preview_bg_btn = ColorButton()
-        self.preview_bg_btn.setToolTip("预览区背景颜色（仅界面显示，不影响压制输出）")
-        self.preview_bg_btn.set_color_hex(StylePreview.DEFAULT_BG)
-        self.preview_bg_btn.changed.connect(self._apply_preview_bg)
-        bg_row.addWidget(self.preview_bg_btn)
-        bg_row.addStretch(1)
-        preview_layout.addLayout(bg_row)
         preview_card.setFixedWidth(300)
         columns.addWidget(preview_card)
 

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
 
 from loguru import logger
@@ -62,14 +63,24 @@ def analyze_highlights(
     times: list[float],
     bucket: float = 10.0,
     top: int = 5,
+    max_duration: float = 300.0,
 ) -> list[HighlightInterval]:
-    """按固定时间窗口统计弹幕数，合并相邻热点窗口，返回最热闹的前 top 段。
+    """按弹幕发送频率找出"高潮点"时间段。
 
-    热点判定：窗口条数 >= max(2, 平均值的 2 倍)；若无窗口达标（弹幕分布
-    均匀），退化为直接取条数最多的前 top 个窗口。
-    返回结果按时间先后排序。
+    高潮点的定义（满足其一即可）：
+    - **相对突增**：某时间窗口的弹幕数明显多于前后邻近区段（判据：窗口
+      条数 >= max(3, 前后基线的 3 倍)，基线为前后各约 3 分钟窗口的平均值）；
+    - **持续高发**：窗口条数明显高于全片中位水平（>= max(5, 中位数的 3 倍），
+      用于捕捉持续数分钟的密集刷屏段——这类段内部的窗口相对邻近区段
+      并不突增。
+
+    合并相邻热点后，单段时长不超过 max_duration 秒（默认 5 分钟）——
+    超长时段只保留其中最热闹的连续部分。
+
+    返回按总条数排名的前 top 段，结果按时间先后排序；弹幕分布均匀、
+    没有相对高峰时返回空列表。
     """
-    if not times or bucket <= 0 or top <= 0:
+    if not times or bucket <= 0 or top <= 0 or max_duration <= 0:
         return []
 
     n_buckets = int(times[-1] // bucket) + 1
@@ -77,20 +88,46 @@ def analyze_highlights(
     for t in times:
         counts[int(t // bucket)] += 1
 
-    mean = len(times) / n_buckets
-    threshold = max(2, mean * 2)
-    hot = [i for i, c in enumerate(counts) if c >= threshold]
-    if not hot:
-        ranked = sorted(range(n_buckets), key=lambda i: counts[i], reverse=True)
-        hot = [i for i in ranked if counts[i] > 0][:top]
+    global_median = statistics.median(counts)
+    absolute_floor = max(5, global_median * 3)
+    context = max(3, int(180 // bucket))
+    hot: list[int] = []
+    for i, c in enumerate(counts):
+        if c >= absolute_floor:
+            hot.append(i)
+            continue
+        lo = max(0, i - context)
+        hi = min(n_buckets, i + context + 1)
+        neighbours = [counts[j] for j in range(lo, hi) if j != i]
+        baseline = (sum(neighbours) / len(neighbours)) if neighbours else 0.0
+        if c >= max(3, baseline * 3):
+            hot.append(i)
 
-    # 合并相邻（含间隔 1 个冷窗口）的热点窗口成段
+    if not hot:
+        return []
+
+    # 合并相邻热点（间隔不超过 2 个冷窗口视为同一段）
     segments: list[list[int]] = []
     for i in hot:
-        if segments and i - segments[-1][-1] <= 2:
+        if segments and i - segments[-1][-1] <= 3:
             segments[-1].append(i)
         else:
             segments.append([i])
+
+    # 单段最长 max_duration：超长时段取其中总条数最大的连续部分
+    cap_buckets = max(1, int(max_duration // bucket))
+    trimmed: list[list[int]] = []
+    for seg in segments:
+        if len(seg) <= cap_buckets:
+            trimmed.append(seg)
+            continue
+        best_lo, best_sum = seg[0], -1
+        for lo in range(seg[0], seg[-1] - cap_buckets + 2):
+            window_sum = sum(counts[j] for j in range(lo, lo + cap_buckets))
+            if window_sum > best_sum:
+                best_lo, best_sum = lo, window_sum
+        trimmed.append(list(range(best_lo, best_lo + cap_buckets)))
+    segments = trimmed
 
     intervals = [
         HighlightInterval(
@@ -105,8 +142,8 @@ def analyze_highlights(
     intervals = intervals[:top]
     intervals.sort(key=lambda it: it.start)
     logger.debug(
-        "高潮点分析: {} 条弹幕 / {} 个窗口, 阈值 {:.1f}, 命中 {} 段",
-        len(times), n_buckets, threshold, len(intervals),
+        "高潮点分析: {} 条弹幕 / {} 个窗口, 命中 {} 段",
+        len(times), n_buckets, len(intervals),
     )
     return intervals
 

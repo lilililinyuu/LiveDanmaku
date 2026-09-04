@@ -203,3 +203,48 @@ class BatchWorker(QThread):
             sys.stderr = old_stderr
             self.summary.emit(total, generated, skipped, failed)
 
+
+
+class DownloadWorker(QThread):
+    """后台 yt-dlp 下载线程：进度行实时发到界面日志。"""
+
+    log = Signal(str)
+    succeeded = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        url: str,
+        fmt: str,
+        out_dir,
+        *,
+        want_video: bool,
+        want_chat: bool,
+        want_thumbnail: bool,
+    ):
+        super().__init__()
+        self.url = url
+        self.fmt = fmt
+        self.out_dir = out_dir
+        self.want_video = want_video
+        self.want_chat = want_chat
+        self.want_thumbnail = want_thumbnail
+
+    def run(self) -> None:
+        from ..core.pipeline import download_items
+        from ..errors import DanmakuStudioError
+
+        try:
+            result = download_items(
+                self.url, self.out_dir, self.fmt,
+                want_video=self.want_video,
+                want_chat=self.want_chat,
+                want_thumbnail=self.want_thumbnail,
+                on_output=self.log.emit,
+            )
+        except DanmakuStudioError as e:
+            self.failed.emit(str(e))
+        except Exception as e:
+            self.failed.emit(f"下载失败: {e}")
+        else:
+            self.succeeded.emit(result)

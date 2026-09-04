@@ -82,3 +82,28 @@ def test_find_matching_subtitle_returns_none_when_directory_unreadable(tmp_path,
     monkeypatch.setattr(Path, "iterdir", fake_iterdir)
 
     assert find_matching_subtitle(video) is None
+
+
+def test_find_matching_subtitle_live_chat_naming(tmp_path):
+    """yt-dlp 的 xxx.live_chat.xml 命名应能匹配到同名视频 xxx。"""
+    from danmakustudio.batch import find_matching_subtitle
+
+    video = tmp_path / "直播.mp4"
+    video.write_bytes(b"v")
+    sub = tmp_path / "直播.live_chat.xml"
+    sub.write_text("<i></i>", encoding="utf-8")
+
+    assert find_matching_subtitle(video) == sub
+
+
+def test_find_matching_subtitle_exact_beats_live_chat(tmp_path):
+    """精确同名 XML 优先于 xxx.live_chat 命名。"""
+    from danmakustudio.batch import find_matching_subtitle
+
+    video = tmp_path / "直播.mp4"
+    video.write_bytes(b"v")
+    exact = tmp_path / "直播.xml"
+    exact.write_text("<i></i>", encoding="utf-8")
+    (tmp_path / "直播.live_chat.xml").write_text("<i></i>", encoding="utf-8")
+
+    assert find_matching_subtitle(video) == exact

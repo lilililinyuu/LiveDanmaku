@@ -47,20 +47,27 @@ def test_download_items_no_selection():
         )
 
 
+class _FakePopen:
+    """模拟 yt-dlp 进程：stdout 按行输出，stderr 为空。"""
+
+    def __init__(self, stdout_lines, returncode=0):
+        self.stdout = iter(stdout_lines)
+        self.stderr = iter([])
+        self.returncode = returncode
+
+    def wait(self):
+        return self.returncode
+
+
 def test_download_items_video_only_command(monkeypatch, tmp_path):
     captured = {}
 
-    class _Result:
-        returncode = 0
-        stdout = str(tmp_path / "视频.mp4") + "\n"
-        stderr = ""
-
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         captured["cmd"] = cmd
-        return _Result()
+        return _FakePopen([str(tmp_path / "视频.mp4") + "\n"])
 
     monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     result = download_items(
         "http://example.com", tmp_path, "b",
@@ -80,17 +87,12 @@ def test_download_items_video_only_command(monkeypatch, tmp_path):
 def test_download_items_thumbnail_only_command(monkeypatch, tmp_path):
     captured = {}
 
-    class _Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         captured["cmd"] = cmd
-        return _Result()
+        return _FakePopen([])
 
     monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     # 未创建真实封面文件 → 应报「未找到封面」；但命令已可断言
     with pytest.raises(DanmakuStudioError, match="封面"):
@@ -104,3 +106,43 @@ def test_download_items_thumbnail_only_command(monkeypatch, tmp_path):
     assert "--write-thumbnail" in cmd
     assert "-f" not in cmd
     assert "--write-subs" not in cmd
+
+
+def test_download_items_streams_output(monkeypatch, tmp_path):
+    """on_output 应回调 yt-dlp 的每一行输出（含进度行）。"""
+    received = []
+
+    def fake_popen(cmd, **kwargs):
+        return _FakePopen([
+            "[download]   5.0% of ~ 1.00GiB",
+            "[download]  100.0% of ~ 1.00GiB",
+            str(tmp_path / "视频.mp4"),
+        ])
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=True, want_chat=False, want_thumbnail=False,
+        on_output=received.append,
+    )
+
+    assert received[0].startswith("[download]   5.0%")
+    assert len(received) == 3
+
+
+def test_download_items_nonzero_exit(monkeypatch, tmp_path):
+    """yt-dlp 失败退出时应抛出下载失败错误。"""
+
+    def fake_popen(cmd, **kwargs):
+        return _FakePopen([], returncode=1)
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    with pytest.raises(DanmakuStudioError, match="yt-dlp 下载失败"):
+        download_items(
+            "http://example.com", tmp_path, "b",
+            want_video=True, want_chat=False, want_thumbnail=False,
+        )

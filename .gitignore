@@ -35,3 +35,4 @@ src.bak/
 *.mp4
 /*.xml
 /chat.json
+/*.live_chat.json

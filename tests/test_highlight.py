@@ -81,13 +81,38 @@ def test_analyze_highlights_merges_adjacent_hot_buckets():
     assert intervals[0].count == 30
 
 
-def test_analyze_highlights_uniform_distribution_falls_back_to_top():
-    """分布均匀无热点时，退化为取条数最多的窗口。"""
+def test_analyze_highlights_uniform_distribution_has_no_highlight():
+    """弹幕分布均匀、没有相对高峰时应返回空（高潮点定义要求相对更密集）。"""
     times = [float(i) * 1.0 for i in range(100)]         # 每 10 秒恰好 1 条
 
-    intervals = analyze_highlights(times, bucket=10.0, top=3)
+    assert analyze_highlights(times, bucket=10.0, top=3) == []
 
-    assert 0 < len(intervals) <= 3
+
+def test_analyze_highlights_caps_segment_at_max_duration():
+    """连续 10 分钟的高发段应被截断为最长 5 分钟。"""
+    times = [float(i * 30) for i in range(30)]           # 背景稀疏
+    times += [1000.0 + i * 1.0 for i in range(600)]      # 1000~1600s，每秒 1 条
+
+    intervals = analyze_highlights(times, bucket=10.0, top=5)
+
+    assert len(intervals) == 1
+    it = intervals[0]
+    assert it.end - it.start <= 300.0
+    assert 1000.0 <= it.start < 1300.0   # 均匀分布时保留最靠前的最优窗口
+    assert it.count == 300
+
+
+def test_analyze_highlights_top_limit():
+    """top 参数限制返回段数：两个高潮只取弹幕最多的前 1 段。"""
+    times = [float(i * 30) for i in range(30)]
+    times += [1000.0 + i * 0.5 for i in range(40)]       # 合计 40 条
+    times += [2000.0 + i * 0.4 for i in range(50)]       # 合计 50 条
+
+    intervals = analyze_highlights(times, bucket=10.0, top=1)
+
+    assert len(intervals) == 1
+    assert intervals[0].count == 50
+    assert intervals[0].start <= 2000.0 <= intervals[0].end
 
 
 def test_analyze_highlights_invalid_input():

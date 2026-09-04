@@ -15,6 +15,18 @@ from xml.sax.saxutils import escape
 _EMOJI_PATTERN = re.compile(r":([^:\s]+):")
 
 
+def default_xml_path_for(json_path: str | Path) -> Path:
+    """聊天 JSON 对应的默认弹幕 XML 路径。
+
+    yt-dlp 导出的弹幕文件名为 `xxx.live_chat.json`，生成的 XML 去掉
+    `.live_chat` 中缀（即 `xxx.xml`），保证能被同名视频的字幕匹配规则找到。
+    """
+    path = Path(json_path)
+    if path.stem.endswith(".live_chat"):
+        return path.with_suffix("").with_suffix(".xml")
+    return path.with_suffix(".xml")
+
+
 def parse_timestamp_usec(usec_str):
     """把 timestampUsec（微秒）转为 ISO 时间戳字符串。"""
     try:

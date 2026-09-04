@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
+from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
@@ -55,12 +58,15 @@ def download_items(
     want_video: bool,
     want_chat: bool,
     want_thumbnail: bool,
+    on_output: Callable[[str], None] | None = None,
 ) -> dict[str, Path | None]:
     """按需下载视频 / 实时弹幕 JSON / 封面，三者可任意组合。
 
     封面会统一转为 PNG 并清理原始图片。返回
     {'video': Path|None, 'chat': Path|None, 'thumbnail': Path|None}，
     未选择的项为 None。
+
+    on_output: yt-dlp 每输出一行（含下载进度）时调用一次，用于界面日志。
     """
     if not (want_video or want_chat or want_thumbnail):
         raise DanmakuStudioError("未选择任何要下载的内容。")
@@ -91,17 +97,43 @@ def download_items(
     ]
 
     logger.info("下载视频/弹幕/封面...")
-    result = subprocess.run(
+    # 流式读取 stdout：进度行即时回调给界面；stderr 由独立线程收集，
+    # 避免管道缓冲区写满导致 yt-dlp 卡死
+    process = subprocess.Popen(
         cmd,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
         creationflags=_CREATE_NO_WINDOW,
     )
-    if result.returncode != 0:
-        raise DanmakuStudioError(f"yt-dlp 下载失败: {result.stderr[-800:]}")
+    assert process.stdout is not None and process.stderr is not None
+    stderr_tail: deque[str] = deque(maxlen=30)
 
-    video, chat = parse_ytdlp_paths(result.stdout.splitlines())
+    def _drain_stderr() -> None:
+        for raw in process.stderr:
+            line_str = raw.strip()
+            if line_str:
+                stderr_tail.append(line_str)
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+
+    lines: list[str] = []
+    for raw in process.stdout:
+        line_str = raw.strip()
+        if not line_str:
+            continue
+        if on_output is not None:
+            on_output(line_str)
+        lines.append(line_str)
+
+    return_code = process.wait()
+    stderr_thread.join(timeout=5)
+    if return_code != 0:
+        tail = "\n".join(list(stderr_tail)[-10:])
+        raise DanmakuStudioError(f"yt-dlp 下载失败: {tail or f'退出码 {return_code}'}")
+
+    video, chat = parse_ytdlp_paths(lines)
 
     thumbnail: Path | None = None
     if want_thumbnail:
