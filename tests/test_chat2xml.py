@@ -110,3 +110,61 @@ def test_default_xml_path_for_strips_live_chat():
 
     assert default_xml_path_for("a/直播.live_chat.json") == Path("a/直播.xml")
     assert default_xml_path_for("a/chat.json") == Path("a/chat.xml")
+
+
+def test_convert_chat_json_drop_first(tmp_path):
+    """drop_first 应在计算时间基准前删除开头消息。"""
+    base = 1753357638681000
+    src = tmp_path / "chat.json"
+    src.write_text(
+        _replay_line(base, "u1", _text_runs("测试1")) + "\n"
+        + _replay_line(base + 2_000_000, "u2", _text_runs("测试2")) + "\n"
+        + _replay_line(base + 5_000_000, "u3", _text_runs("正式")) + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.xml"
+
+    stats = convert_chat_json(src, out, lead_in=0.0, drop_first=2)
+
+    assert stats["messages"] == 1
+    assert stats["dropped"] == 2
+
+    events, _ = parse_subtitle_with_emoji(str(out))
+    assert len(events) == 1
+    assert events[0].time == pytest.approx(0.0)
+    assert events[0].text == "正式"
+
+
+def test_convert_chat_json_drop_first_too_many(tmp_path):
+    """删除条数不少于消息总数时应报错。"""
+    src = tmp_path / "chat.json"
+    src.write_text(_replay_line(1753357638681000, "u1", _text_runs("hi")) + "\n",
+                   encoding="utf-8")
+
+    with pytest.raises(ValueError, match="不少于"):
+        convert_chat_json(src, tmp_path / "out.xml", drop_first=1)
+
+
+def test_preview_json_events(tmp_path):
+    """preview_json_events 应返回相对时间排序的前 limit 条消息。"""
+    from danmakustudio.input.chat2xml import preview_json_events
+
+    base = 1753357638681000
+    src = tmp_path / "chat.json"
+    src.write_text(
+        _replay_line(base + 3_000_000, "u2", _text_runs("第二")) + "\n"
+        + _replay_line(base, "u1", _text_runs("第一")) + "\n"
+        + _replay_line(base + 8_000_000, "u3", _text_runs("第三")) + "\n",
+        encoding="utf-8",
+    )
+
+    events = preview_json_events(str(src))
+    assert [(e.time, e.user, e.text) for e in events] == [
+        (0.0, "u1", "第一"),
+        (3.0, "u2", "第二"),
+        (8.0, "u3", "第三"),
+    ]
+
+    limited = preview_json_events(str(src), limit=2)
+    assert len(limited) == 2
+    assert limited[0].text == "第一"

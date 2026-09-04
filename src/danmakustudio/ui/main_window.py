@@ -1125,12 +1125,17 @@ class DanmakuStudioWindow(QWidget):
         elif thumbnail is not None:
             self._remember_selection_dir([str(thumbnail)], str(out_dir))
 
-        # 视频 + 弹幕：转 XML 并询问是否加入队列
+        # 视频 + 弹幕：先（可选）删除 JSON 开头弹幕，再转 XML 并询问加入队列
         if video is not None and chat is not None:
             from ..input.chat2xml import convert_chat_json
 
             xml_out = video.with_suffix(".xml")
-            stats = convert_chat_json(str(chat), xml_out, lead_in=0.0)
+            drop_first = self._ask_drop_first_for_json(chat)
+            stats = convert_chat_json(
+                str(chat), xml_out, lead_in=0.0, drop_first=drop_first,
+            )
+            if drop_first:
+                self.append_log(f"  已删除开头 {drop_first} 条弹幕")
             self.append_log(f"  弹幕转换: {stats['messages']} 条 → {xml_out.name}")
             answer = QMessageBox.question(
                 self,
@@ -1155,6 +1160,36 @@ class DanmakuStudioWindow(QWidget):
             )
             if answer == QMessageBox.StandardButton.Yes:
                 os.startfile(str(thumbnail))
+
+    def _ask_drop_first_for_json(self, chat_json: Path) -> int:
+        """下载完成后询问：转换前是否删除 JSON 开头弹幕。
+
+        参照「压制设置 → 删除开头弹幕」的交互：列出 JSON 前 40 条
+        （序号/时间/用户/内容）选择保留哪一条，其之前的全部删除。
+        返回要删除的条数（0 = 不删除）。
+        """
+        from ..input.chat2xml import preview_json_events
+
+        try:
+            events = preview_json_events(str(chat_json))
+        except OSError as e:
+            QMessageBox.warning(self, "提示", f"聊天 JSON 读取失败: {e}")
+            return 0
+        if not events:
+            return 0
+
+        answer = QMessageBox.question(
+            self,
+            "删除开头弹幕",
+            "转换前是否先删除开头几条弹幕（如直播开始前发出的测试弹幕）？",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return 0
+
+        dialog = TrimReferenceDialog(events, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return 0
+        return max(0, dialog.keep_index - 1)
 
     def _on_download_failed(self, message: str) -> None:
         """下载失败（主线程）：恢复按钮并提示。"""

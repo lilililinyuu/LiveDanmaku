@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from .event import DanmakuEvent
+
 _EMOJI_PATTERN = re.compile(r":([^:\s]+):")
 
 
@@ -25,6 +27,49 @@ def default_xml_path_for(json_path: str | Path) -> Path:
     if path.stem.endswith(".live_chat"):
         return path.with_suffix("").with_suffix(".xml")
     return path.with_suffix(".xml")
+
+
+def preview_json_events(json_path: str | Path, limit: int = 40) -> list[DanmakuEvent]:
+    """提取聊天 JSON 开头的消息，供「删除开头弹幕」参照选择展示。
+
+    返回按时间排序的前 limit 条，时间为相对最早一条消息的秒数；
+    只统计普通文本消息（与 XML 转换的范围一致）。
+    """
+    raw: list[tuple[float, str, str]] = []
+    for obj in parse_objects_from_file(str(json_path)):
+        replay_action = obj.get("replayChatItemAction")
+        if not replay_action:
+            continue
+        for action in replay_action.get("actions", []):
+            add_item = action.get("addChatItemAction")
+            if not add_item:
+                continue
+            item = add_item.get("item")
+            if not item:
+                continue
+            renderer = item.get("liveChatTextMessageRenderer")
+            if not renderer:
+                continue
+            usec = renderer.get("timestampUsec")
+            try:
+                ts = int(usec) / 1_000_000
+            except (TypeError, ValueError):
+                continue
+            author = renderer.get("authorName", {}).get("simpleText", "") or "匿名"
+            text, _ = extract_message_runs(renderer.get("message", {}).get("runs", []))
+            text = text.strip()
+            if not text:
+                continue
+            raw.append((ts, author, text))
+
+    if not raw:
+        return []
+    base = min(t for t, _, _ in raw)
+    raw.sort(key=lambda e: e[0])
+    return [
+        DanmakuEvent(time=t - base, user=author, text=text)
+        for t, author, text in raw[:limit]
+    ]
 
 
 def parse_timestamp_usec(usec_str):
@@ -123,6 +168,7 @@ def convert_chat_json(
     json_path: str | Path,
     xml_path: str | Path,
     lead_in: float = 0.0,
+    drop_first: int = 0,
 ) -> dict:
     """把 YouTube 直播回放 JSON 转为弹幕 XML。
 
@@ -130,10 +176,14 @@ def convert_chat_json(
         json_path: 输入 JSON 文件（JSONL 格式的 live_chat）
         xml_path: 输出 XML 文件
         lead_in: 第一条弹幕相对视频开始的时间（秒）
+        drop_first: 转换前删除开头的消息条数（如直播开始前的测试弹幕）
 
     Returns:
-        统计信息：{"messages": 条数, "start_time": 视频起始时间 ISO, "lead_in": 秒}
+        统计信息：{"messages": 条数, "dropped": 删除条数,
+        "start_time": 视频起始时间 ISO, "lead_in": 秒}
     """
+    if drop_first < 0:
+        raise ValueError(f"删除条数不能为负数，当前 {drop_first}")
     data_entries = []
     for obj in parse_objects_from_file(str(json_path)):
         replay_action = obj.get("replayChatItemAction")
@@ -180,6 +230,12 @@ def convert_chat_json(
         raise ValueError("未提取到任何弹幕消息")
 
     data_entries.sort(key=lambda x: x["timestamp"])
+    if drop_first:
+        if drop_first >= len(data_entries):
+            raise ValueError(
+                f"删除条数 {drop_first} 不少于消息总数 {len(data_entries)}"
+            )
+        del data_entries[:drop_first]
 
     first_time = data_entries[0]["timestamp"]
     start_dt = (
@@ -222,6 +278,7 @@ def convert_chat_json(
 
     return {
         "messages": len(data_entries),
+        "dropped": drop_first,
         "start_time": start_dt.isoformat(),
         "lead_in": lead_in,
     }
