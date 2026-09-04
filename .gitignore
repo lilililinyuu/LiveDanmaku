@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.mypy_cache/
+.claude/
+.vscode/
+.idea/
+
+# Virtual environments
+.venv*/
+
+# Project data (not tracked)
+source/
+logs/
+other/
+assets/
+output*.mp4
+*.log
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest-tmp/
+.pytest_cache/
+.ruff_cache/
+
+# 旧源码备份与 IDE 运行产物
+src.bak/
+
+# 大型媒体/数据文件不入库（压制输出、直播回放、聊天导出等）
+*.mp4
+/*.xml
+/chat.json

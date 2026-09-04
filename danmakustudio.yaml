@@ -1,0 +1,48 @@
+style:
+  danmaku_x: 0
+  layer_width_extra: 100
+  row_vertical_gap: 1
+  multiline_row_gap: 1
+  font_family: ''
+  font_size: 32
+  text:
+    color: '#FFFFFF'
+    opacity: 0.5
+    outline_color: '#000000'
+    outline_width: 1.1
+    shadow_color: '#1d1d1d'
+    shadow_opacity: 0.5
+  member_text:
+    color: '#50ff8a'
+    opacity: 0.5
+    outline_color: '#153b26'
+    outline_width: 1.1
+    shadow_color: '#2b2b2b'
+    shadow_opacity: 0.5
+  emoji:
+    opacity: 1.0
+    size_ratio: 1.0
+    spacing: 4
+ratio:
+  max_text_rows: 20
+  text_width_ratio: 0.8
+  top_margin: 12
+  bottom_margin: 303
+animation:
+  first_danmaku_at: 2.0
+encode:
+  gpu_preset: p5
+  gpu_cq: 15
+  qsv_preset: slow
+  qsv_quality: 18
+  cpu_preset: medium
+  cpu_crf: 18
+  cpu_min_reserve_threads: 2
+  extra_args: []
+system:
+  pipe_buffer_size: 10000000
+  pipe_queue_size: 16
+  ffmpeg_timeout: 10
+  stderr_thread_timeout: 5
+  video_alignment: 2
+  max_queue_frames: 64
