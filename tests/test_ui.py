@@ -14,11 +14,7 @@ from danmakustudio.config.models import (
 )
 from danmakustudio.ui._shared import config_dialog_start_location
 from danmakustudio.ui.file_picker import FileFolderPickerDialog
-from danmakustudio.ui.main_window import (
-    DanmakuStudioWindow,
-    DownloadDialog,
-    TrimReferenceDialog,
-)
+from danmakustudio.ui.main_window import DanmakuStudioWindow, TrimReferenceDialog
 from danmakustudio.ui.style_panel import StylePanel
 from danmakustudio.ui.theme import APP_STYLESHEET, CheckMarkCheckBox, apply_theme
 
@@ -156,9 +152,9 @@ def test_style_panel_disabled_effects_yield_empty(qapp):
     panel.close()
 
 
-def test_import_chat_json_creates_xml_and_adopts_job(qapp, tmp_path, monkeypatch):
-    """JSON 转 XML 应生成同名 XML；检测到同名视频时询问并加入任务队列。"""
-    from PySide6.QtWidgets import QFileDialog, QMessageBox
+def test_json_page_converts_and_adopts_job(qapp, tmp_path, monkeypatch):
+    """JSON 页转换应生成同名 XML；检测到同名视频时询问并加入任务队列。"""
+    from PySide6.QtWidgets import QMessageBox
 
     video = tmp_path / "直播.mp4"
     video.write_bytes(b"not-a-real-video")
@@ -173,16 +169,13 @@ def test_import_chat_json_creates_xml_and_adopts_job(qapp, tmp_path, monkeypatch
 
     apply_theme(qapp)
     window = DanmakuStudioWindow()
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName",
-        staticmethod(lambda *a, **k: (str(chat), "")),
-    )
+    window.json_path_edit.setText(str(chat))
     monkeypatch.setattr(
         QMessageBox, "question",
         staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes),
     )
 
-    window.import_chat_json()
+    window.start_json_convert()
 
     xml = tmp_path / "直播.xml"
     assert xml.exists()
@@ -367,6 +360,7 @@ def test_style_panel_rows_do_not_overlap(qapp):
     apply_theme(qapp)
     window = DanmakuStudioWindow()
     window.style_panel.custom_check.setChecked(True)
+    window.nav_list.setCurrentRow(1)  # 切到弹幕样式页，隐藏页面的几何坐标不可靠
     window.show()
     qapp.processEvents()
 
@@ -553,12 +547,88 @@ def test_batch_worker_accepts_drop_first_and_clip_start(qapp):
     assert worker.clip_start == 12.5
 
 
-def test_download_dialog_format_field(qapp):
+def test_download_page_format_field(qapp):
+    """下载页格式字段应去除首尾空白；空值表示使用默认格式。"""
     apply_theme(qapp)
-    dialog = DownloadDialog()
+    window = DanmakuStudioWindow()
 
-    assert dialog.fmt() == ""
-    dialog.format_edit.setText("  bv*[height<=720]+ba/b  ")
-    assert dialog.fmt() == "bv*[height<=720]+ba/b"
+    assert window._download_format() == ""
+    window.dl_format_edit.setText("  bv*[height<=720]+ba/b  ")
+    assert window._download_format() == "bv*[height<=720]+ba/b"
 
-    dialog.close()
+    window.close()
+
+
+def test_main_window_sidebar_navigation(qapp):
+    """侧边栏应包含 4 个功能页，切换导航项应切换页面。"""
+    from PySide6.QtWidgets import QPushButton
+
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+
+    assert window.nav_list.count() == 4
+    assert window.nav_list.item(0).text() == "压制设置"
+    assert window.nav_list.item(1).text() == "弹幕样式"
+    assert window.nav_list.item(2).text() == "JSON 转 XML"
+    assert window.nav_list.item(3).text() == "下载内容"
+    assert window.pages.count() == 4
+    assert window.pages.currentIndex() == 0
+
+    window.nav_list.setCurrentRow(2)
+    assert window.pages.currentIndex() == 2
+    # JSON 页控件已就位
+    assert any(
+        btn.text() == "转换为 XML"
+        for btn in window.pages.widget(2).findChildren(QPushButton)
+    )
+
+    window.close()
+
+
+def test_main_window_sidebar_collapse(qapp):
+    """收起侧边栏后仅保留窄条，再点恢复导航列表。"""
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+    window.show()
+    qapp.processEvents()
+
+    assert not window.sidebar_collapsed
+    assert window.nav_list.isVisibleTo(window.sidebar)
+
+    window.btn_toggle_sidebar.click()
+    assert window.sidebar_collapsed
+    assert not window.nav_list.isVisibleTo(window.sidebar)
+    assert window.sidebar.width() <= 48
+    assert window.btn_toggle_sidebar.text() == "»"
+
+    window.btn_toggle_sidebar.click()
+    assert not window.sidebar_collapsed
+    assert window.nav_list.isVisibleTo(window.sidebar)
+    assert window.btn_toggle_sidebar.text() == "«"
+
+    window.close()
+
+
+def test_main_window_task_area_below_pages(qapp):
+    """任务队列应位于垂直分割器下半部分，与功能页上下分区。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter
+
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+    window.show()
+    qapp.processEvents()
+
+    main_split = window.findChild(QSplitter, "mainSplit")
+    assert main_split is not None
+    assert main_split.orientation() == Qt.Orientation.Vertical
+    top_split = window.findChild(QSplitter, "topSplit")
+    assert top_split is not None
+    assert top_split.orientation() == Qt.Orientation.Horizontal
+
+    # 任务卡（含日志）在页面区下方
+    task_bottom = window.progress_bar.mapTo(window, window.progress_bar.rect().topLeft()).y()
+    page_bottom = top_split.mapTo(window, top_split.rect().topLeft()).y() + top_split.height()
+    assert task_bottom >= page_bottom - 8
+
+    window.close()

@@ -103,6 +103,83 @@ QFrame#card {
     border-radius: 14px;
 }
 
+QFrame#sidebar {
+    background: #ffffff;
+    border: 1px solid #e0e5ee;
+    border-radius: 14px;
+}
+
+QLabel#sidebarTitle {
+    color: #8a93a5;
+    font-size: 9pt;
+    font-weight: 650;
+    padding: 2px 4px 0 4px;
+}
+
+QListWidget#navList {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0;
+    font-size: 10.5pt;
+}
+
+QListWidget#navList::item {
+    color: #414b5e;
+    border-radius: 9px;
+    padding: 10px 12px;
+    margin: 2px 0;
+}
+
+QListWidget#navList::item:hover {
+    background: #f0f2f6;
+}
+
+QListWidget#navList::item:selected {
+    color: #34348f;
+    background: #ecebff;
+    font-weight: 600;
+}
+
+QPushButton#navToggle {
+    min-width: 34px;
+    max-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    color: #414b5e;
+    background: #f0f2f6;
+    border: 1px solid #e0e5ee;
+    border-radius: 9px;
+    padding: 0;
+    font-size: 13pt;
+    font-weight: 700;
+}
+
+QPushButton#navToggle:hover {
+    border-color: #aaa8ed;
+    background: #ecebff;
+}
+
+QSplitter::handle {
+    background: #e3e8f1;
+}
+
+QSplitter::handle:horizontal {
+    width: 5px;
+    margin: 12px 2px;
+    border-radius: 2px;
+}
+
+QSplitter::handle:vertical {
+    height: 5px;
+    margin: 2px 12px;
+    border-radius: 2px;
+}
+
+QSplitter::handle:hover {
+    background: #aaa8ed;
+}
+
 QScrollArea#settingsScroll, QWidget#scrollBody {
     background: transparent;
     border: none;

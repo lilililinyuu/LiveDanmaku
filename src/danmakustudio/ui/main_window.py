@@ -21,11 +21,14 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -53,56 +56,6 @@ from .worker import BatchWorker
 
 # 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
 _TRIM_REF_WINDOW = 40
-
-
-class DownloadDialog(QDialog):
-    """统一下载对话框：输入链接 + 勾选要下载的内容（视频/弹幕/封面）。"""
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setWindowTitle("下载视频 / 弹幕 / 封面")
-        self.setMinimumWidth(440)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-
-        form = QFormLayout()
-        self.url_edit = QLineEdit()
-        self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
-        form.addRow("视频链接", self.url_edit)
-        self.format_edit = QLineEdit()
-        self.format_edit.setPlaceholderText("留空使用默认（优先 mp4）")
-        self.format_edit.setToolTip('yt-dlp 的 -f 格式字符串，例如 "bv*[height<=1080]+ba/b"')
-        form.addRow("下载格式", self.format_edit)
-        layout.addLayout(form)
-
-        self.video_check = QCheckBox("视频（直播回放）")
-        self.video_check.setChecked(True)
-        self.chat_check = QCheckBox("实时弹幕（live_chat JSON）")
-        self.chat_check.setChecked(True)
-        self.thumbnail_check = QCheckBox("封面（转 PNG）")
-        layout.addWidget(self.video_check)
-        layout.addWidget(self.chat_check)
-        layout.addWidget(self.thumbnail_check)
-
-        hint = QLabel("可任意勾选组合；下载视频与弹幕后会自动转 XML 并询问是否加入队列。")
-        hint.setObjectName("fieldHint")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("下载")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def url(self) -> str:
-        return self.url_edit.text().strip()
-
-    def fmt(self) -> str:
-        """自定义 yt-dlp 下载格式；空字符串表示使用默认。"""
-        return self.format_edit.text().strip()
 
 
 class TrimReferenceDialog(QDialog):
@@ -172,10 +125,11 @@ class DanmakuStudioWindow(QWidget):
         super().__init__()
         self.setWindowTitle("DanmakuStudio · 弹幕压制工作台")
         self.setObjectName("appRoot")
-        self.resize(920, 880)
-        self.setMinimumSize(760, 680)
+        self.resize(1150, 820)
+        self.setMinimumSize(900, 640)
         self.worker: BatchWorker | None = None
         self.pending_jobs: list[BatchJob] = []
+        self.sidebar_collapsed = False
         self.last_dir = str(get_app_dir())
         self.last_config_dir = ""
         self._load_last_dir()
@@ -372,23 +326,24 @@ class DanmakuStudioWindow(QWidget):
         self.style_panel = StylePanel()
         style_layout.addWidget(self.style_panel)
 
-        # 上方两张设置卡片放入滚动区：窗口高度不足时滚动而非压缩，
-        # 避免样式面板各行被挤压重叠
-        scroll = QScrollArea()
-        scroll.setObjectName("settingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_body = QWidget()
-        scroll_body.setObjectName("scrollBody")
-        scroll_layout = QVBoxLayout(scroll_body)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(16)
-        scroll_layout.addWidget(settings_card)
-        scroll_layout.addWidget(style_card)
-        scroll_layout.addStretch(1)
-        scroll.setWidget(scroll_body)
-        layout.addWidget(scroll, 0)
+        # 侧边导航 + 功能页：压制设置 / 弹幕样式 / JSON 转 XML / 下载内容
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._wrap_scroll(settings_card))
+        self.pages.addWidget(self._wrap_scroll(style_card))
+        self.pages.addWidget(self._build_json_page())
+        self.pages.addWidget(self._build_download_page())
+
+        sidebar = self._build_sidebar()
+        self.nav_list.currentRowChanged.connect(self.pages.setCurrentIndex)
+
+        top_split = QSplitter(Qt.Orientation.Horizontal)
+        top_split.setObjectName("topSplit")
+        top_split.setChildrenCollapsible(False)
+        top_split.addWidget(sidebar)
+        top_split.addWidget(self.pages)
+        top_split.setStretchFactor(0, 0)
+        top_split.setStretchFactor(1, 1)
+        top_split.setSizes([176, 940])
 
         task_card = QFrame()
         task_card.setObjectName("card")
@@ -413,16 +368,6 @@ class DanmakuStudioWindow(QWidget):
         self.btn_choose = QPushButton("选择视频或文件夹")
         self.btn_choose.clicked.connect(self.choose_items)
         actions.addWidget(self.btn_choose)
-
-        self.btn_import_json = QPushButton("JSON 转 XML…")
-        self.btn_import_json.setToolTip("把 YouTube 直播回放聊天 JSON 转换为弹幕 XML")
-        self.btn_import_json.clicked.connect(self.import_chat_json)
-        actions.addWidget(self.btn_import_json)
-
-        self.btn_download = QPushButton("下载视频/弹幕/封面…")
-        self.btn_download.setToolTip("用 yt-dlp 下载 YouTube 视频、实时弹幕 JSON 与封面（可勾选组合）")
-        self.btn_download.clicked.connect(self.download_flow)
-        actions.addWidget(self.btn_download)
 
         self.btn_preview = QPushButton("生成预览图…")
         self.btn_preview.setToolTip("选一个视频，用当前设置渲染弹幕预览 PNG（压制前确认效果）")
@@ -454,7 +399,18 @@ class DanmakuStudioWindow(QWidget):
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setAccessibleName("批量处理进度")
         task_layout.addWidget(self.progress_bar)
-        layout.addWidget(task_card, 1)
+
+        # 上下分割：功能页固定在上，任务队列/日志固定在下，可拖动调节高度
+        task_card.setMinimumHeight(220)
+        main_split = QSplitter(Qt.Orientation.Vertical)
+        main_split.setObjectName("mainSplit")
+        main_split.setChildrenCollapsible(False)
+        main_split.addWidget(top_split)
+        main_split.addWidget(task_card)
+        main_split.setStretchFactor(0, 1)
+        main_split.setStretchFactor(1, 0)
+        main_split.setSizes([560, 280])
+        layout.addWidget(main_split, 1)
 
         self._reload_style_panel()
         self.style_panel.restore_state()
@@ -514,6 +470,163 @@ class DanmakuStudioWindow(QWidget):
         except DanmakuStudioError:
             return
         self.style_panel.load_from(config)
+
+    def _wrap_scroll(self, widget: QWidget) -> QScrollArea:
+        """把页面内容包进滚动区：高度不足时滚动而非压缩控件。"""
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(widget)
+        return scroll
+
+    def _build_sidebar(self) -> QFrame:
+        """侧边导航栏：功能页切换与收起/展开。"""
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        side_layout = QVBoxLayout(sidebar)
+        side_layout.setContentsMargins(10, 12, 10, 12)
+        side_layout.setSpacing(10)
+
+        self.btn_toggle_sidebar = QPushButton("«")
+        self.btn_toggle_sidebar.setObjectName("navToggle")
+        self.btn_toggle_sidebar.setToolTip("收起侧边栏")
+        self.btn_toggle_sidebar.clicked.connect(self._toggle_sidebar)
+        side_layout.addWidget(self.btn_toggle_sidebar, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.sidebar_title = QLabel("功能导航")
+        self.sidebar_title.setObjectName("sidebarTitle")
+        side_layout.addWidget(self.sidebar_title)
+
+        self.nav_list = QListWidget()
+        self.nav_list.setObjectName("navList")
+        for label in ("压制设置", "弹幕样式", "JSON 转 XML", "下载内容"):
+            self.nav_list.addItem(label)
+        self.nav_list.setCurrentRow(0)
+        side_layout.addWidget(self.nav_list)
+        side_layout.addStretch(1)
+
+        self.sidebar = sidebar
+        return sidebar
+
+    def _toggle_sidebar(self) -> None:
+        """收起/展开侧边栏；收起后仅保留窄条与展开按钮。"""
+        self.sidebar_collapsed = not self.sidebar_collapsed
+        if self.sidebar_collapsed:
+            self.sidebar_title.setVisible(False)
+            self.nav_list.setVisible(False)
+            self.sidebar.setFixedWidth(48)
+            self.btn_toggle_sidebar.setText("»")
+            self.btn_toggle_sidebar.setToolTip("展开侧边栏")
+        else:
+            self.sidebar.setMinimumWidth(150)
+            self.sidebar.setMaximumWidth(16777215)
+            self.sidebar_title.setVisible(True)
+            self.nav_list.setVisible(True)
+            self.btn_toggle_sidebar.setText("«")
+            self.btn_toggle_sidebar.setToolTip("收起侧边栏")
+
+    def _build_json_page(self) -> QFrame:
+        """「JSON 转 XML」功能页。"""
+        card = QFrame()
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("JSON 转 XML")
+        title.setObjectName("sectionTitle")
+        description = QLabel(
+            "把 YouTube 直播回放聊天 JSON（yt-dlp 导出）转换为弹幕 XML；"
+            "检测到同名视频时会询问是否直接加入任务队列。"
+        )
+        description.setObjectName("sectionDescription")
+        description.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(description)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        path_row = QHBoxLayout()
+        path_row.setSpacing(8)
+        self.json_path_edit = QLineEdit()
+        self.json_path_edit.setPlaceholderText("选择 yt-dlp 导出的聊天 JSON 文件")
+        self.btn_json_browse = QPushButton("浏览…")
+        self.btn_json_browse.clicked.connect(self.browse_chat_json)
+        path_row.addWidget(self.json_path_edit, 1)
+        path_row.addWidget(self.btn_json_browse)
+        form.addRow("聊天 JSON", path_row)
+        layout.addLayout(form)
+
+        convert_row = QHBoxLayout()
+        self.btn_json_convert = QPushButton("转换为 XML")
+        self.btn_json_convert.clicked.connect(self.start_json_convert)
+        convert_row.addWidget(self.btn_json_convert)
+        convert_row.addStretch(1)
+        layout.addLayout(convert_row)
+        layout.addStretch(1)
+        return card
+
+    def _build_download_page(self) -> QFrame:
+        """「下载内容」功能页：yt-dlp 下载视频 / 弹幕 / 封面。"""
+        card = QFrame()
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("下载视频 / 弹幕 / 封面")
+        title.setObjectName("sectionTitle")
+        description = QLabel(
+            "用 yt-dlp 下载 YouTube 直播回放，可任意勾选组合；"
+            "视频 + 弹幕下载完成后会自动转换为 XML 并询问加入任务队列。"
+        )
+        description.setObjectName("sectionDescription")
+        description.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(description)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.dl_url_edit = QLineEdit()
+        self.dl_url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
+        form.addRow("视频链接", self.dl_url_edit)
+        self.dl_format_edit = QLineEdit()
+        self.dl_format_edit.setPlaceholderText("留空使用默认（优先 mp4）")
+        self.dl_format_edit.setToolTip('yt-dlp 的 -f 格式字符串，例如 "bv*[height<=1080]+ba/b"')
+        form.addRow("下载格式", self.dl_format_edit)
+        content_row = QHBoxLayout()
+        content_row.setSpacing(12)
+        self.dl_video_check = QCheckBox("视频（直播回放）")
+        self.dl_video_check.setChecked(True)
+        self.dl_chat_check = QCheckBox("实时弹幕（live_chat JSON）")
+        self.dl_chat_check.setChecked(True)
+        self.dl_thumbnail_check = QCheckBox("封面（转 PNG）")
+        for check in (self.dl_video_check, self.dl_chat_check, self.dl_thumbnail_check):
+            content_row.addWidget(check)
+        content_row.addStretch(1)
+        form.addRow("下载内容", content_row)
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(8)
+        self.dl_dir_edit = QLineEdit()
+        self.dl_dir_edit.setPlaceholderText("保存目录")
+        self.dl_dir_edit.setText(self.last_dir)
+        self.btn_download_browse = QPushButton("浏览…")
+        self.btn_download_browse.clicked.connect(self.browse_download_dir)
+        dir_row.addWidget(self.dl_dir_edit, 1)
+        dir_row.addWidget(self.btn_download_browse)
+        form.addRow("保存目录", dir_row)
+        layout.addLayout(form)
+
+        download_row = QHBoxLayout()
+        self.btn_download_start = QPushButton("开始下载")
+        self.btn_download_start.clicked.connect(self.start_download)
+        download_row.addWidget(self.btn_download_start)
+        download_row.addStretch(1)
+        layout.addLayout(download_row)
+        layout.addStretch(1)
+        return card
 
     def _update_clip_start_enabled(self, *_args) -> None:
         """自定义起点仅在与测试片段同时启用时可用。"""
@@ -636,10 +749,11 @@ class DanmakuStudioWindow(QWidget):
         """任务运行期间锁定界面控件，结束后恢复。"""
         for widget in (
             self.btn_choose, self.btn_start, self.btn_config, self.encode_combo,
-            self.force_checkbox, self.btn_import_json, self.btn_download,
-            self.btn_preview, self.btn_drop_reference, self.drop_first_spin,
+            self.force_checkbox, self.btn_preview,
+            self.btn_drop_reference, self.drop_first_spin,
             self.test_clip_check, self.clip_duration_spin,
             self.clip_start_check, self.clip_start_spin,
+            self.btn_json_convert, self.btn_download_start,
         ):
             widget.setEnabled(not locked)
         if not locked:
@@ -781,27 +895,41 @@ class DanmakuStudioWindow(QWidget):
         )
         self._set_status(f"{len(self.pending_jobs)} 个任务就绪", "ready")
 
-    def import_chat_json(self) -> None:
-        """把 YouTube 聊天 JSON 转换为弹幕 XML；检测到同名视频时询问加入任务队列。"""
-        if self.worker is not None and self.worker.isRunning():
-            QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
-            return
-
-        json_path, _ = QFileDialog.getOpenFileName(
+    def browse_chat_json(self) -> None:
+        path_text, _ = QFileDialog.getOpenFileName(
             self,
             "选择 YouTube 聊天 JSON",
             self.last_dir,
             "JSON 文件 (*.json);;所有文件 (*)",
         )
-        if not json_path:
+        if not path_text:
             return
+        self.json_path_edit.setText(path_text)
+        self._remember_selection_dir([path_text], self.last_dir)
 
-        xml_out = Path(json_path).with_suffix(".xml")
+    def start_json_convert(self) -> None:
+        """把页面选择的聊天 JSON 转换为弹幕 XML。"""
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
+            return
+        path_text = self.json_path_edit.text().strip()
+        if not path_text:
+            QMessageBox.warning(self, "提示", "请先选择聊天 JSON 文件。")
+            return
+        json_path = Path(path_text)
+        if not json_path.is_file():
+            QMessageBox.warning(self, "提示", f"文件不存在: {json_path}")
+            return
+        self._convert_chat_json_and_adopt(json_path)
+
+    def _convert_chat_json_and_adopt(self, json_path: Path) -> None:
+        """转换聊天 JSON 为 XML；检测到同名视频时询问加入任务队列。"""
+        xml_out = json_path.with_suffix(".xml")
         self.setCursor(Qt.CursorShape.WaitCursor)
         try:
             from ..input.chat2xml import convert_chat_json
 
-            stats = convert_chat_json(json_path, xml_out, lead_in=0.0)
+            stats = convert_chat_json(str(json_path), xml_out, lead_in=0.0)
         except Exception as e:
             QMessageBox.critical(self, "转换失败", f"JSON 转 XML 失败:\n{e}")
             return
@@ -829,57 +957,77 @@ class DanmakuStudioWindow(QWidget):
                 f"检测到同名视频:\n{video}\n\n是否加入任务队列？",
             )
             if answer == QMessageBox.StandardButton.Yes:
-                from ..batch import BatchJob, default_output_path_for_video
+                from ..batch import default_output_path_for_video
 
-                job = BatchJob(
+                self._adopt_jobs([BatchJob(
                     video_path=video,
                     subtitle_path=xml_out,
                     output_path=default_output_path_for_video(video),
-                )
-                self._adopt_jobs([job])
+                )])
                 return
 
         self.summary_label.setText(
             f"JSON 转换完成: {stats['messages']} 条弹幕 → {xml_out.name}"
         )
 
-    def download_flow(self) -> None:
-        """统一下载：视频 / 实时弹幕 / 封面，可任意勾选组合。"""
+    def browse_download_dir(self) -> None:
+        start = self.dl_dir_edit.text().strip() or self.last_dir
+        dir_path = QFileDialog.getExistingDirectory(self, "选择保存目录", start)
+        if dir_path:
+            self.dl_dir_edit.setText(dir_path)
+            self._remember_selection_dir([dir_path], self.last_dir)
+
+    def _download_format(self) -> str:
+        """页面上的 yt-dlp 下载格式；空字符串表示使用默认。"""
+        return self.dl_format_edit.text().strip()
+
+    def start_download(self) -> None:
+        """按页面设置用 yt-dlp 下载视频 / 弹幕 / 封面。"""
         if self.worker is not None and self.worker.isRunning():
             QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
             return
-
-        dialog = DownloadDialog(self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        url = dialog.url()
+        url = self.dl_url_edit.text().strip()
         if not url:
             QMessageBox.warning(self, "提示", "请输入视频链接。")
             return
-        want_video = dialog.video_check.isChecked()
-        want_chat = dialog.chat_check.isChecked()
-        want_thumbnail = dialog.thumbnail_check.isChecked()
+        want_video = self.dl_video_check.isChecked()
+        want_chat = self.dl_chat_check.isChecked()
+        want_thumbnail = self.dl_thumbnail_check.isChecked()
         if not (want_video or want_chat or want_thumbnail):
             QMessageBox.warning(self, "提示", "请至少勾选一项要下载的内容。")
             return
+        out_dir = self.dl_dir_edit.text().strip() or self.last_dir
+        self._run_download(
+            url, self._download_format(), out_dir,
+            want_video=want_video,
+            want_chat=want_chat,
+            want_thumbnail=want_thumbnail,
+        )
 
-        out_dir = QFileDialog.getExistingDirectory(self, "选择保存目录", self.last_dir)
-        if not out_dir:
-            return
-
+    def _run_download(
+        self,
+        url: str,
+        fmt: str,
+        out_dir_text: str,
+        *,
+        want_video: bool,
+        want_chat: bool,
+        want_thumbnail: bool,
+    ) -> None:
+        """执行下载并处理后续（转 XML / 加入队列 / 打开封面）。"""
+        out_dir = Path(out_dir_text)
         self.append_log(f"开始下载: {url}（请稍候，大视频耗时较长）")
         self.setCursor(Qt.CursorShape.WaitCursor)
         try:
             from ..core.pipeline import _YTDLP_FORMAT, download_items
 
             result = download_items(
-                url, Path(out_dir), dialog.fmt() or _YTDLP_FORMAT,
+                url, out_dir, fmt or _YTDLP_FORMAT,
                 want_video=want_video,
                 want_chat=want_chat,
                 want_thumbnail=want_thumbnail,
             )
         except Exception as e:
-            self.unsetCursor()
             QMessageBox.critical(self, "下载失败", str(e))
             return
         finally:
@@ -903,16 +1051,16 @@ class DanmakuStudioWindow(QWidget):
         )
 
         if video is not None:
-            self._remember_selection_dir([str(video)], out_dir)
+            self._remember_selection_dir([str(video)], str(out_dir))
         elif thumbnail is not None:
-            self._remember_selection_dir([str(thumbnail)], out_dir)
+            self._remember_selection_dir([str(thumbnail)], str(out_dir))
 
         # 视频 + 弹幕：转 XML 并询问是否加入队列
         if video is not None and chat is not None:
             from ..input.chat2xml import convert_chat_json
 
             xml_out = video.with_suffix(".xml")
-            stats = convert_chat_json(chat, xml_out, lead_in=0.0)
+            stats = convert_chat_json(str(chat), xml_out, lead_in=0.0)
             self.append_log(f"  弹幕转换: {stats['messages']} 条 → {xml_out.name}")
             answer = QMessageBox.question(
                 self,
@@ -920,14 +1068,13 @@ class DanmakuStudioWindow(QWidget):
                 f"下载并转换完成（{stats['messages']} 条弹幕）。\n\n是否加入任务队列？",
             )
             if answer == QMessageBox.StandardButton.Yes:
-                from ..batch import BatchJob, default_output_path_for_video
+                from ..batch import default_output_path_for_video
 
-                job = BatchJob(
+                self._adopt_jobs([BatchJob(
                     video_path=video,
                     subtitle_path=xml_out,
                     output_path=default_output_path_for_video(video),
-                )
-                self._adopt_jobs([job])
+                )])
 
         # 封面：询问是否打开
         if thumbnail is not None:
