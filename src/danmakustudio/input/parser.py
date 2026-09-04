@@ -171,3 +171,17 @@ def align_first_event_time(events: list[DanmakuEvent], target_seconds: float) ->
     if shift:
         for e in events:
             e.time += shift
+
+
+def drop_first_events(events: list[DanmakuEvent], count: int) -> list[DanmakuEvent]:
+    """删除开头 count 条事件，返回剩余事件列表（浅拷贝，原列表不变）。
+
+    用于去掉直播开始前发出的测试弹幕等；count 为 0 时返回全部事件。
+    """
+    if count < 0:
+        raise ValueError(f"删除条数不能为负数，当前 {count}")
+    if count > 0 and count >= len(events):
+        raise ValueError(
+            f"删除条数 {count} 不能不少于事件总数 {len(events)}（会删除全部弹幕）"
+        )
+    return events[count:]

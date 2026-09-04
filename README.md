@@ -7,6 +7,7 @@
 - **图形化批量处理** - 可多选视频或文件夹，自动递归查找文件夹内视频
 - **自动匹配字幕** - 自动寻找同目录下同名 XML/LRC 字幕；XML 和 LRC 同时存在时优先选择 XML
 - **XML/LRC 支持** - XML 支持普通弹幕与会员弹幕；LRC 支持时间轴文本，并尽量识别常见导出格式中的用户名
+- **开头弹幕删除** - 可删除开头 N 条弹幕（如直播开始前的测试弹幕）；pipeline 工作台还支持从前 40 条中参照选择一条，删除其之前的全部弹幕
 - **滚动弹幕** - 弹幕从视频右端向左匀速滚动，多行车道布局，长文本自动折行
 - **文本样式** - 字体颜色/字体类型/大小可调，支持描边与文本阴影（颜色+不透明度）；会员与普通用户样式可完全分开调整
 - **Emoji 图片加载** - 本地 `assets/emoji/` PNG 与 YouTube 平台表情（由 `json2xml.py` 在 XML 中内嵌图片 URL，压制时按需下载缓存到 `~/.danmakustudio_emoji_cache/`）均可显示，不透明度、大小、间距独立可调
@@ -165,6 +166,12 @@ danmakustudio source/视频.mp4 source/字幕.lrc
 danmakustudio source/视频.mp4 source/弹幕.xml --encode gpu -o output.mp4 -f
 ```
 
+删除开头 N 条弹幕（如直播开始前的测试弹幕）：
+
+```bash
+danmakustudio source/视频.mp4 source/弹幕.xml --drop-first 5
+```
+
 使用自定义配置文件：
 
 ```bash
@@ -174,7 +181,7 @@ danmakustudio source/视频.mp4 source/弹幕.xml -c danmakustudio.yaml
 ### 预览图（压制前确认样式）
 
 ```bash
-danmakustudio preview source/视频.mp4 source/弹幕.xml [-c 配置] [-t 10,300,600] [-o 输出目录] [--yes]
+danmakustudio preview source/视频.mp4 source/弹幕.xml [-c 配置] [-t 10,300,600] [-o 输出目录] [--drop-first N] [--yes]
 ```
 
 默认自动挑选 3 个时间点（首条弹幕处 + 弹幕分布中点 + 末尾）；时间点没有可见弹幕时会自动向后微调。生成后打印 PNG 路径并询问是否用系统图片查看器打开。
@@ -206,18 +213,22 @@ danmakustudio pipeline source/视频.mp4 [选项]
 进入交互菜单，**自由选择要执行的步骤**（可反复执行、任意顺序、q 退出）：
 
 ```text
-[1] 下载直播回放（yt-dlp，仅 URL 源需要）
-[2] 弹幕 JSON 转 XML
-[3] 弹幕渲染配置摘要
-[4] 生成预览图
-[5] 展示 ffmpeg 压缩命令
-[6] 测试压缩片段（先确认效果）
-[7] 完整视频压缩
+[1] 下载直播回放（yt-dlp，仅 URL 源）
+[2] 下载视频封面（yt-dlp，转 PNG）
+[3] 弹幕 JSON 转 XML
+[4] 删除开头弹幕（前 N 条 / 前 40 条参照选择）
+[5] 弹幕渲染配置摘要
+[6] 生成预览图
+[7] 展示 ffmpeg 压缩命令
+[8] 测试压缩片段（先确认效果）
+[9] 完整视频压缩
 ```
 
 以本地视频为源时，自动匹配同目录同名 JSON（`xxx.live_chat.json` 或 `xxx.json`）；以 URL 为源时先执行步骤 1 下载。
 
-常用选项：`-c 配置`、`--out-dir 目录`（下载与中间产物）、`--encode auto|gpu|qsv|cpu`、`--lead-in 秒`（首条弹幕时间）、`--clip-duration 秒`（测试片段时长，默认 60）、`--ffmpeg-args "..."`（自定义压缩参数）、`--yes`（跳过"是否打开预览"等询问）、`--format "..."`（yt-dlp 下载格式）。下载需 yt-dlp 已安装且可访问 YouTube。
+步骤 4 用于去掉直播开始前发出的测试弹幕等：直接输入 N 删除开头 N 条（0 撤销删除）；输入 `r` 会列出前 40 条弹幕（序号/时间/用户/内容），选择保留第几条，其之前的弹幕全部删除。设置作用于之后的预览图、测试片段与完整压缩，重复执行步骤 4 可覆盖。
+
+常用选项：`-c 配置`、`--out-dir 目录`（下载与中间产物）、`--encode auto|gpu|qsv|cpu`、`--lead-in 秒`（首条弹幕时间）、`--drop-first N`（删除开头 N 条弹幕，跳过交互步骤 4）、`--clip-duration 秒`（测试片段时长，默认 60）、`--ffmpeg-args "..."`（自定义压缩参数）、`--yes`（跳过"是否打开预览"等询问）、`--format "..."`（yt-dlp 下载格式）。下载需 yt-dlp 已安装且可访问 YouTube。
 
 ### 弹幕 JSON → XML（单独转换）
 

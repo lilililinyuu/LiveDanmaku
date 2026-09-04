@@ -12,6 +12,7 @@ from PySide6.QtGui import QGuiApplication
 from danmakustudio.input.event import DanmakuEvent
 from danmakustudio.input.parser import (
     align_first_event_time,
+    drop_first_events,
     parse_lrc,
     parse_subtitle,
     parse_subtitle_with_emoji,
@@ -201,6 +202,45 @@ def test_align_first_event_time():
     assert [e.time for e in events] == [0.0, 3.0]
 
     align_first_event_time([], 2.0)  # 空列表不报错
+
+
+def test_drop_first_events():
+    """删除开头 N 条后应保留其余事件（含字段与顺序），原列表不变。"""
+    events = [
+        DanmakuEvent(time=1.0, user="a", text="测试"),
+        DanmakuEvent(time=2.0, user="b", text="hello"),
+        DanmakuEvent(time=3.0, user="c", text="正式弹幕"),
+    ]
+    snapshot = [(e.time, e.user, e.text) for e in events]
+
+    remaining = drop_first_events(events, 2)
+
+    assert [(e.time, e.user, e.text) for e in remaining] == snapshot[2:]
+    assert remaining[0].is_membership is False
+    # 原列表不受影响
+    assert [(e.time, e.user, e.text) for e in events] == snapshot
+
+
+def test_drop_first_events_zero_keeps_all():
+    """count 为 0 时不删除任何事件。"""
+    events = [DanmakuEvent(time=1.0, user="a", text="x")]
+    assert len(drop_first_events(events, 0)) == 1
+
+
+def test_drop_first_events_empty_list():
+    """空列表删除 0 条应返回空列表。"""
+    assert drop_first_events([], 0) == []
+
+
+def test_drop_first_events_invalid_count():
+    """负数或不少于事件总数的删除条数应报错。"""
+    events = [DanmakuEvent(time=1.0, user="a", text="x")]
+    with pytest.raises(ValueError, match="负数"):
+        drop_first_events(events, -1)
+    with pytest.raises(ValueError, match="全部"):
+        drop_first_events(events, 1)
+    with pytest.raises(ValueError, match="全部"):
+        drop_first_events(events, 5)
 
 
 # =============================================================================

@@ -1,8 +1,8 @@
 """pipeline 菜单工作台。
 
 不再强制固定执行顺序：输入 URL（下载）或本地视频文件后进入交互菜单，
-由用户自由选择要执行的步骤（下载 / JSON 转 XML / 配置摘要 / 预览图 /
-参数展示 / 测试片段 / 完整压缩），可反复执行直至退出。
+由用户自由选择要执行的步骤（下载 / JSON 转 XML / 删除开头弹幕 / 配置摘要 /
+预览图 / 参数展示 / 测试片段 / 完整压缩），可反复执行直至退出。
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from ..config.models import DanmakuConfig, EncodeMode
 from ..encode.ffmpeg import FFmpegManager
 from ..errors import DanmakuStudioError
 from ..input.chat2xml import convert_chat_json
+from ..input.parser import drop_first_events, parse_subtitle
 from ..layout.engine import LayoutEngine
 from ..utils.helpers import ensure_qt_app
 from .burner import DanmakuBurner
@@ -27,6 +28,9 @@ from .preview import generate_previews
 _YTDLP_FORMAT = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
 _VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".flv", ".mov", ".ts", ".avi")
 _IMAGE_EXTS = (".webp", ".jpg", ".jpeg", ".png", ".avif", ".jfif", ".gif")
+
+# 参照选择时展示的开头弹幕条数
+TRIM_REF_WINDOW = 40
 
 
 def _confirm(prompt: str, default: bool = False, yes: bool = False) -> bool:
@@ -40,6 +44,42 @@ def _confirm(prompt: str, default: bool = False, yes: bool = False) -> bool:
     if not answer:
         return default
     return answer in ("y", "yes")
+
+
+def parse_trim_count(raw: str, total: int) -> int:
+    """解析"删除开头 N 条"输入，返回 N（0 表示撤销删除）。
+
+    非数字或越界（N >= total 会删除全部弹幕）抛 ValueError。
+    """
+    n = int(raw.strip())
+    if n < 0:
+        raise ValueError(f"删除条数不能为负数，当前 {n}")
+    if n >= total:
+        raise ValueError(f"删除条数 {n} 不少于弹幕总数 {total}（会删除全部弹幕）")
+    return n
+
+
+def parse_trim_keep_index(raw: str, total: int, window: int = TRIM_REF_WINDOW) -> int:
+    """解析"保留第 i 条"参照选择输入，返回应删除的条数 i-1。
+
+    接受 "12" 或 "#12"；序号限 1 ~ min(window, total)，越界抛 ValueError。
+    """
+    i = int(raw.lstrip("#＃").strip())
+    upper = min(window, total)
+    if not 1 <= i <= upper:
+        raise ValueError(f"序号需在 1~{upper} 范围内，当前 {i}")
+    return i - 1
+
+
+def trim_reference_lines(events, window: int = TRIM_REF_WINDOW) -> list[str]:
+    """生成开头弹幕的参照列表行：序号. [时间] 用户: 内容。"""
+    lines = []
+    for i, ev in enumerate(events[:window], start=1):
+        text = ev.text.replace("\n", " ").strip()
+        if len(text) > 36:
+            text = text[:36] + "…"
+        lines.append(f"  {i:>2}. [{ev.time:.1f}s] {ev.user}: {text}")
+    return lines
 
 
 def parse_ytdlp_paths(lines: list[str]) -> tuple[Path | None, Path | None]:
@@ -217,6 +257,7 @@ class Workbench:
     video: Path | None = None       # 步骤1下载后填充
     chat_json: Path | None = None   # 步骤1下载后填充
     xml_path: Path | None = None    # 步骤2转换后填充
+    drop_first: int = 0             # 步骤4设置：删除开头 N 条弹幕（按原始弹幕列表计）
 
 
 def find_sibling_json(video: Path) -> Path | None:
@@ -283,6 +324,63 @@ def step_convert(wb: Workbench) -> None:
     logger.success(f"弹幕 XML: {xml_path}（{stats['messages']} 条弹幕）")
 
 
+def _find_trim_xml(wb: Workbench) -> Path:
+    """定位删除开头弹幕步骤使用的弹幕 XML。"""
+    if wb.xml_path is not None and wb.xml_path.exists():
+        return wb.xml_path
+    if wb.video is not None:
+        xml = wb.video.with_suffix(".xml")
+        if xml.exists():
+            return xml
+    raise DanmakuStudioError("弹幕 XML 不存在，请先执行步骤 3 转换")
+
+
+def step_trim_head(wb: Workbench) -> None:
+    """[4] 删除开头弹幕：直接输入条数，或从前 40 条中参照选择。
+
+    设置保存在 wb.drop_first（按原始弹幕列表计，重复执行本步骤为覆盖
+    而非累加），供后续预览图 / 测试片段 / 完整压缩使用。
+    """
+    xml_path = _find_trim_xml(wb)
+    events = parse_subtitle(str(xml_path))
+    if not events:
+        raise DanmakuStudioError(f"弹幕 XML 没有任何事件: {xml_path}")
+
+    current = f"，当前已设置删除开头 {wb.drop_first} 条" if wb.drop_first else ""
+    print(f"弹幕共 {len(events)} 条{current}")
+    raw = input(
+        f"输入 N 删除开头 N 条（0 撤销删除）；输入 r 从前 {TRIM_REF_WINDOW} 条"
+        "中参照选择；回车返回: "
+    ).strip()
+    if not raw:
+        return
+
+    try:
+        if raw.lower() == "r":
+            for line in trim_reference_lines(events):
+                print(line)
+            keep_raw = input(
+                "保留第几条？输入序号，该条之前的弹幕全部删除；c 取消: "
+            ).strip()
+            if not keep_raw or keep_raw.lower() in ("c", "cancel"):
+                print("已取消")
+                return
+            count = parse_trim_keep_index(keep_raw, len(events))
+        else:
+            count = parse_trim_count(raw, len(events))
+    except ValueError as e:
+        print(f"输入无效: {e}")
+        return
+
+    wb.drop_first = count
+    remaining = drop_first_events(events, count)
+    first = remaining[0]
+    print(f"已设置: 删除开头 {count} 条，剩余 {len(remaining)} 条")
+    print(f"新首条: [{first.time:.1f}s] {first.user}: {first.text[:40]}")
+    if count:
+        print("该设置将用于之后的预览图 / 测试片段 / 完整压缩")
+
+
 def _ensure_xml(wb: Workbench) -> Path:
     if wb.video is None:
         raise DanmakuStudioError("尚无视频，请先执行步骤 1 下载（或直接指定本地视频文件）")
@@ -303,6 +401,8 @@ def step_summary(wb: Workbench) -> None:
           f"描边{style.text.outline_width or '无'} 阴影{style.text.shadow_opacity or '无'}")
     print(f"  会员文本: {style.member_text.color} 不透明度{style.member_text.opacity}")
     print(f"  表情: 大小{style.emoji.size_ratio}x 不透明度{style.emoji.opacity} 间距{style.emoji.spacing}")
+    if wb.drop_first:
+        print(f"  开头弹幕: 删除前 {wb.drop_first} 条")
     print(f"  首条弹幕: {wb.config.animation.first_danmaku_at if wb.config.animation.first_danmaku_at is not None else '字幕原时间轴'}")
     print(f"  编码: {wb.config.encode.cpu_preset}/{wb.config.encode.cpu_crf} (CPU) | "
           f"{wb.config.encode.qsv_preset}/q{wb.config.encode.qsv_quality} (QSV) | "
@@ -317,6 +417,7 @@ def step_preview(wb: Workbench) -> None:
     preview_paths = generate_previews(
         str(wb.video), str(xml_path), wb.config,
         out_dir=wb.out_dir / "preview",
+        drop_first=wb.drop_first,
     )
     print("\n预览图已生成:")
     for p in preview_paths:
@@ -360,7 +461,7 @@ def _make_burner(wb: Workbench, out_path: Path, clip=None) -> DanmakuBurner:
     return DanmakuBurner(
         str(wb.video), str(_ensure_xml(wb)), str(out_path),
         encode_mode=wb.encode_mode, config=wb.config, force=True,
-        clip=clip,
+        clip=clip, drop_first=wb.drop_first,
     )
 
 
@@ -390,11 +491,12 @@ _MENU_ITEMS: list[tuple[str, str]] = [
     ("1", "下载直播回放（yt-dlp，仅 URL 源）"),
     ("2", "下载视频封面（yt-dlp，转 PNG）"),
     ("3", "弹幕 JSON 转 XML"),
-    ("4", "弹幕渲染配置摘要"),
-    ("5", "生成预览图"),
-    ("6", "展示 ffmpeg 压缩命令"),
-    ("7", "测试压缩片段（先确认效果）"),
-    ("8", "完整视频压缩"),
+    ("4", "删除开头弹幕（前 N 条 / 前 40 条参照选择）"),
+    ("5", "弹幕渲染配置摘要"),
+    ("6", "生成预览图"),
+    ("7", "展示 ffmpeg 压缩命令"),
+    ("8", "测试压缩片段（先确认效果）"),
+    ("9", "完整视频压缩"),
 ]
 
 
@@ -419,15 +521,18 @@ def run_workbench(wb: Workbench) -> None:
         "1": step_download,
         "2": step_thumbnail,
         "3": step_convert,
-        "4": step_summary,
-        "5": step_preview,
-        "6": step_show_cmd,
-        "7": step_test_clip,
-        "8": step_full_encode,
+        "4": step_trim_head,
+        "5": step_summary,
+        "6": step_preview,
+        "7": step_show_cmd,
+        "8": step_test_clip,
+        "9": step_full_encode,
     }
 
     while True:
         print("\n━━━ 选择要执行的步骤（可执行多次，q 退出）━━━")
+        if wb.drop_first:
+            print(f"当前设置: 删除开头 {wb.drop_first} 条弹幕（步骤 4 可修改）")
         for key, title in _MENU_ITEMS:
             print(f"  [{key}] {title}")
         try:

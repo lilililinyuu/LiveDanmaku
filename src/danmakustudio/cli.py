@@ -22,6 +22,15 @@ from pathlib import Path
 from loguru import logger
 from PySide6.QtWidgets import QApplication
 
+# GBK 等控制台无法编码弹幕文本中的 emoji 时会崩溃，降级为替换字符
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(errors="replace")
+        except ValueError:
+            pass
+
 from .config.loader import load_config
 from .config.models import EncodeMode
 from .core.burner import DanmakuBurner
@@ -51,11 +60,17 @@ def preview_main() -> None:
         "--yes", action="store_true",
         help="自动确认，不询问是否打开预览图",
     )
+    parser.add_argument(
+        "--drop-first", type=int, default=0,
+        help="删除开头 N 条弹幕（如直播开始前的测试弹幕）",
+    )
     args = parser.parse_args()
 
     configure_logger()
     ensure_qt_app()
     try:
+        if args.drop_first < 0:
+            parser.error("--drop-first 不能为负数")
         config = load_config(args.config)
         times = None
         if args.times:
@@ -66,6 +81,7 @@ def preview_main() -> None:
             args.video, args.subtitle, config,
             times=times,
             out_dir=Path(args.out_dir) if args.out_dir else None,
+            drop_first=args.drop_first,
         )
     except DanmakuStudioError as e:
         logger.error(f"[{e.category.value}] {e}")
@@ -115,10 +131,16 @@ def pipeline_main() -> None:
         "--ffmpeg-args", default=None,
         help="自定义 ffmpeg 参数（追加在命令末尾，可覆盖默认压缩参数）",
     )
+    parser.add_argument(
+        "--drop-first", type=int, default=0,
+        help="删除开头 N 条弹幕（0=不删除；工作台步骤 4 也可交互设置）",
+    )
     args = parser.parse_args()
 
     configure_logger()
     try:
+        if args.drop_first < 0:
+            parser.error("--drop-first 不能为负数")
         config = load_config(args.config)
         if args.ffmpeg_args:
             import shlex
@@ -141,6 +163,7 @@ def pipeline_main() -> None:
             clip_duration=args.clip_duration,
             output=Path(args.output) if args.output else None,
             yes=args.yes,
+            drop_first=args.drop_first,
             fmt=args.format or Workbench.fmt,
         )
         run_workbench(wb)
@@ -199,6 +222,10 @@ def main() -> None:
         help="片段时长（秒，默认 60）",
     )
     parser.add_argument(
+        "--drop-first", type=int, default=0,
+        help="删除开头 N 条弹幕（如直播开始前的测试弹幕）",
+    )
+    parser.add_argument(
         "--gui", action="store_true", default=False,
         help="启动图形界面",
     )
@@ -234,10 +261,13 @@ def main() -> None:
             video_path = Path(args.video)
             video_out = str(video_path.parent / f"{video_path.stem}.test-clip.mp4")
         clip = (args.clip_start, args.clip_duration) if args.test_clip else None
+        if args.drop_first < 0:
+            parser.error("--drop-first 不能为负数")
         burner = DanmakuBurner(
             video_in=args.video, xml_in=args.subtitle,
             video_out=video_out, encode_mode=args.encode,
             config=config, force=args.force, clip=clip,
+            drop_first=args.drop_first,
         )
     except DanmakuStudioError as e:
         logger.error(f"[{e.category.value}] {e}")

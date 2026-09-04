@@ -13,8 +13,12 @@ from tqdm import tqdm
 
 from ..config.models import DEFAULT_CONFIG, EncodeMode
 from ..encode.ffmpeg import FFmpegManager
-from ..errors import DanmakuStudioError, EncodeError
-from ..input.parser import align_first_event_time, parse_subtitle_with_emoji
+from ..errors import DanmakuStudioError, EncodeError, InputError
+from ..input.parser import (
+    align_first_event_time,
+    drop_first_events,
+    parse_subtitle_with_emoji,
+)
 from ..layout.engine import LayoutContext, LayoutEngine
 from ..render.assets import AssetLoader
 from ..render.renderer import DanmakuRenderer
@@ -75,7 +79,7 @@ def danmaku_state_at(
     return active
 
 class DanmakuBurner:
-    def __init__(self, video_in, xml_in, video_out=None, encode_mode=EncodeMode.AUTO, config=DEFAULT_CONFIG, force=False, progress_callback=None, clip=None):
+    def __init__(self, video_in, xml_in, video_out=None, encode_mode=EncodeMode.AUTO, config=DEFAULT_CONFIG, force=False, progress_callback=None, clip=None, drop_first=0):
         validate_video_input(video_in)
         validate_subtitle_input(xml_in)
         self.video_in = video_in
@@ -84,6 +88,9 @@ class DanmakuBurner:
         self._config = config
         self._progress_callback = progress_callback
         self._clip = clip
+        if drop_first < 0:
+            raise InputError(f"删除条数不能为负数，当前 {drop_first}")
+        self._drop_first = drop_first
         if video_out:
             self.video_out = video_out
         else:
@@ -103,6 +110,13 @@ class DanmakuBurner:
         syscfg = cfg.system
 
         events, remote_emoji = parse_subtitle_with_emoji(self.subtitle_in)
+        if self._drop_first > 0:
+            if self._drop_first >= len(events):
+                raise InputError(
+                    f"删除条数 {self._drop_first} 不少于弹幕总数 {len(events)}（会删除全部弹幕）"
+                )
+            events = drop_first_events(events, self._drop_first)
+            logger.info(f"已删除开头 {self._drop_first} 条弹幕，剩余 {len(events)} 条")
         if cfg.animation.first_danmaku_at is not None:
             align_first_event_time(events, cfg.animation.first_danmaku_at)
         subtitle_type = Path(self.subtitle_in).suffix.upper().lstrip(".")

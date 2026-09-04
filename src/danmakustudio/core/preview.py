@@ -14,7 +14,11 @@ from PySide6.QtGui import QImage, QPainter
 from ..config.models import DEFAULT_CONFIG
 from ..encode.ffmpeg import FFmpegManager
 from ..errors import DanmakuStudioError
-from ..input.parser import align_first_event_time, parse_subtitle_with_emoji
+from ..input.parser import (
+    align_first_event_time,
+    drop_first_events,
+    parse_subtitle_with_emoji,
+)
 from ..layout.engine import LayoutContext, LayoutEngine
 from ..render.assets import AssetLoader
 from .burner import danmaku_layout_context, danmaku_state_at
@@ -102,6 +106,7 @@ def generate_previews(
     config=DEFAULT_CONFIG,
     times: list[float] | None = None,
     out_dir: Path | None = None,
+    drop_first: int = 0,
 ) -> list[Path]:
     """生成预览图，返回输出文件路径列表。"""
     v_info = FFmpegManager.probe_video(video_in)
@@ -112,6 +117,13 @@ def generate_previews(
     duration = total_frames / fps if fps > 0 else 0
 
     events, remote_emoji = parse_subtitle_with_emoji(subtitle_in)
+    if drop_first > 0:
+        if drop_first >= len(events):
+            raise DanmakuStudioError(
+                f"删除条数 {drop_first} 不少于弹幕总数 {len(events)}（会删除全部弹幕）"
+            )
+        events = drop_first_events(events, drop_first)
+        logger.info(f"已删除开头 {drop_first} 条弹幕，剩余 {len(events)} 条")
     if config.animation.first_danmaku_at is not None:
         align_first_event_time(events, config.animation.first_danmaku_at)
     if not events:
