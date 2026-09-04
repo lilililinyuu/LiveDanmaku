@@ -10,7 +10,7 @@ from loguru import logger
 
 from .utils.validation import SUPPORTED_VIDEO_EXTS
 
-SUPPORTED_BATCH_SUBTITLE_EXTS = (".xml", ".lrc")
+SUPPORTED_BATCH_SUBTITLE_EXTS = (".xml", ".lrc", ".json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +75,8 @@ def iter_videos_in_folder(folder_path: Path) -> list[Path]:
 def find_matching_subtitle(video_path: Path) -> Path | None:
     """查找同名字幕文件。
 
-    优先选择同目录下同名的 XML；只有不存在 XML 时才选择 LRC。
-    精确同名都不存在时，退而匹配 yt-dlp 导出的 `xxx.live_chat.xml/lrc`
+    优先级：同目录同名 XML > LRC > JSON（YouTube 聊天导出，可直接压制）；
+    精确同名都不存在时，退而匹配 yt-dlp 导出的 `xxx.live_chat.*`
     命名（对应视频 `xxx`）。
     """
     if not video_path.is_file():

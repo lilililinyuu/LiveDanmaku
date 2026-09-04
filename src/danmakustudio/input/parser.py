@@ -10,7 +10,7 @@ from lxml import etree
 
 from .event import DanmakuEvent
 
-SUPPORTED_SUBTITLE_EXTS = frozenset({".xml", ".lrc"})
+SUPPORTED_SUBTITLE_EXTS = frozenset({".xml", ".lrc", ".json"})
 
 _LRC_TIMESTAMP_RE = re.compile(r"\[(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]")
 _LRC_COLON_USER_RE = re.compile(r"^(?P<user>[^:：\t\r\n]{1,32})\s*[:：]\s*(?P<text>.+)$")
@@ -150,12 +150,20 @@ def parse_subtitle(path):
 
 
 def parse_subtitle_with_emoji(path) -> tuple[list[DanmakuEvent], dict[str, str]]:
-    """解析字幕文件，同时返回表情名 -> 图片 URL 映射（LRC 无表情，返回空映射）。"""
+    """解析字幕文件，同时返回表情名 -> 图片 URL 映射。
+
+    XML 含 <e> 表情元数据；LRC 无表情（返回空映射）；JSON 为 YouTube
+    聊天导出，表情 URL 由其内嵌数据提供。
+    """
     suffix = Path(path).suffix.lower()
     if suffix == ".xml":
         return parse_xml_with_emoji(path)
     if suffix == ".lrc":
         return parse_lrc(path), {}
+    if suffix == ".json":
+        from ..input.chat2xml import chat_json_events
+
+        return chat_json_events(path)
     raise ValueError(f"不支持的弹幕格式: {suffix}")
 
 

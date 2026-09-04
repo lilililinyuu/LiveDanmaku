@@ -1,5 +1,6 @@
 """GUI 主题和主窗口状态测试。"""
 
+import json
 from itertools import pairwise
 
 import pytest
@@ -708,3 +709,53 @@ def test_download_worker_converts_out_dir_to_path(qapp, tmp_path, monkeypatch):
     assert isinstance(captured["out_dir"], Path)
     assert captured["out_dir"] == tmp_path
     assert results == [{"video": None, "chat": None, "thumbnail": None}]
+
+
+def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
+    """参照选择应支持 JSON 弹幕文件（压制设置页的删除开头弹幕）。"""
+    from PySide6.QtWidgets import QDialog
+
+    from danmakustudio.batch import BatchJob
+
+    subtitle = tmp_path / "直播.live_chat.json"
+    subtitle.write_text(
+        json.dumps({
+            "replayChatItemAction": {"actions": [{"addChatItemAction": {
+                "item": {"liveChatTextMessageRenderer": {
+                    "timestampUsec": "1753357638681000",
+                    "authorName": {"simpleText": "u1"},
+                    "message": {"runs": [{"text": "hi"}]},
+                }},
+            }}]}},
+        ) + "\n",
+        encoding="utf-8",
+    )
+    apply_theme(qapp)
+    window = DanmakuStudioWindow()
+    window.pending_jobs = [
+        BatchJob(
+            video_path=tmp_path / "直播.mp4",
+            subtitle_path=subtitle,
+            output_path=tmp_path / "out.mp4",
+        )
+    ]
+
+    class FakeDialog:
+        def __init__(self, events, parent=None):
+            self.events = events
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        @property
+        def keep_index(self):
+            return 1
+
+    monkeypatch.setattr(
+        "danmakustudio.ui.main_window.TrimReferenceDialog", FakeDialog
+    )
+
+    window.choose_drop_first_reference()
+
+    assert window.drop_first_spin.value() == 0
+    window.close()

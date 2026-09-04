@@ -1,12 +1,12 @@
 # DanmakuStudio
 
-图形化弹幕/LRC 批量压制工具。它可以将直播录像与弹幕 XML/LRC 合成，以从右往左滚动的半透明文本形式将弹幕永久烧录到视频中。
+图形化弹幕/LRC 批量压制工具。它可以将直播录像与弹幕 XML/LRC/JSON 合成，以从右往左滚动的半透明文本形式将弹幕永久烧录到视频中。
 
 ## 特性
 
 - **图形化批量处理** - 可多选视频或文件夹，自动递归查找文件夹内视频
-- **自动匹配字幕** - 自动寻找同目录下同名 XML/LRC 字幕；XML 和 LRC 同时存在时优先选择 XML
-- **XML/LRC 支持** - XML 支持普通弹幕与会员弹幕；LRC 支持时间轴文本，并尽量识别常见导出格式中的用户名
+- **自动匹配字幕** - 自动寻找同目录下同名 XML/LRC/JSON 弹幕；多种同时存在时优先选择 XML
+- **XML/LRC/JSON 支持** - XML 支持普通弹幕与会员弹幕；LRC 支持时间轴文本；JSON（yt-dlp 聊天导出，含 `xxx.live_chat.json`）可直接压制，无需先转 XML
 - **开头弹幕删除** - 可删除开头 N 条弹幕（如直播开始前的测试弹幕）；支持从前 40 条中参照选择一条，删除其之前的全部弹幕
 - **滚动弹幕** - 弹幕从视频右端向左匀速滚动，多行车道布局
 - **文本样式** - 字体颜色/字体类型/大小可调，支持描边与文本阴影（颜色+不透明度）；会员与普通用户样式可完全分开调整
@@ -139,7 +139,7 @@ danmakustudio
 支持的字幕扩展名：
 
 ```text
-.xml .lrc
+.xml .lrc .json
 ```
 
 例如：
@@ -298,7 +298,7 @@ dist\DanmakuStudio\DanmakuStudio.exe
 字幕解析 -> 资源加载 -> 视频信息获取 -> 弹幕布局计算 -> 逐帧渲染 -> FFmpeg 合成
 ```
 
-1. 解析 XML/LRC 字幕；XML 会提取 `<d>` 标签（以及 `<e name url>` 表情元数据），LRC 会解析时间轴文本
+1. 解析 XML/LRC/JSON 弹幕；XML 会提取 `<d>` 标签（以及 `<e name url>` 表情元数据），LRC 会解析时间轴文本，JSON（聊天导出）直接解析消息与表情
 2. 加载 Emoji 图片资源（本地 assets 或按 `<e>` URL 下载缓存），按需加载字体
 3. 通过 ffprobe 获取视频宽高、帧率、总帧数
 4. 预创建弹幕对象，计算布局参数
@@ -316,7 +316,7 @@ DanmakuStudio/
 │   ├── config/               # 配置模块
 │   ├── core/                 # 压制流程编排（burner/preview）、yt-dlp 下载辅助（pipeline）、高潮点分析（highlight）
 │   ├── encode/               # FFmpeg 进程管理
-│   ├── input/                # XML/LRC 字幕解析、YouTube 聊天 JSON 转换（chat2xml）
+│   ├── input/                # XML/LRC 字幕解析、YouTube 聊天 JSON 解析与转换（chat2xml）
 │   ├── layout/               # 布局计算、活跃弹幕状态
 │   ├── render/               # 文本渲染、图片资源加载（emoji_fetch 远程表情下载）
 │   ├── ui/                   # 图形界面（主窗口/样式面板/下载与转换页/后台线程）

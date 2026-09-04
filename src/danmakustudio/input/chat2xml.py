@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -32,54 +32,36 @@ def default_xml_path_for(json_path: str | Path) -> Path:
 def preview_json_events(json_path: str | Path, limit: int = 40) -> list[DanmakuEvent]:
     """提取聊天 JSON 开头的消息，供「删除开头弹幕」参照选择展示。
 
-    返回按时间排序的前 limit 条，时间为相对最早一条消息的秒数；
-    只统计普通文本消息（与 XML 转换的范围一致）。
+    返回按时间排序的前 limit 条，时间为相对最早一条消息的秒数。
     """
-    raw: list[tuple[float, str, str]] = []
-    for obj in parse_objects_from_file(str(json_path)):
-        replay_action = obj.get("replayChatItemAction")
-        if not replay_action:
-            continue
-        for action in replay_action.get("actions", []):
-            add_item = action.get("addChatItemAction")
-            if not add_item:
-                continue
-            item = add_item.get("item")
-            if not item:
-                continue
-            renderer = item.get("liveChatTextMessageRenderer")
-            if not renderer:
-                continue
-            usec = renderer.get("timestampUsec")
-            try:
-                ts = int(usec) / 1_000_000
-            except (TypeError, ValueError):
-                continue
-            author = renderer.get("authorName", {}).get("simpleText", "") or "匿名"
-            text, _ = extract_message_runs(renderer.get("message", {}).get("runs", []))
-            text = text.strip()
-            if not text:
-                continue
-            raw.append((ts, author, text))
-
-    if not raw:
-        return []
-    base = min(t for t, _, _ in raw)
-    raw.sort(key=lambda e: e[0])
-    return [
-        DanmakuEvent(time=t - base, user=author, text=text)
-        for t, author, text in raw[:limit]
-    ]
-
-
-def parse_timestamp_usec(usec_str):
-    """把 timestampUsec（微秒）转为 ISO 时间戳字符串。"""
     try:
-        us = int(usec_str)
-        dt = datetime.fromtimestamp(us / 1_000_000, tz=UTC)
-        return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    except (TypeError, ValueError):
-        return None
+        events, _ = chat_json_events(json_path)
+    except ValueError:
+        return []
+    return events[:limit]
+
+
+def parse_objects_from_file(filepath):
+    """按行解析 JSONL（容错：对象跨行时缓冲累积）。"""
+    buffer = ""
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            buffer += line
+            try:
+                obj = json.loads(buffer)
+                yield obj
+                buffer = ""
+            except json.JSONDecodeError:
+                continue
+        if buffer:
+            try:
+                obj = json.loads(buffer)
+                yield obj
+            except json.JSONDecodeError:
+                pass
 
 
 def extract_message_runs(runs):
@@ -141,27 +123,86 @@ def is_membership_from_badges(badges):
     return False
 
 
-def parse_objects_from_file(filepath):
-    """按行解析 JSONL（容错：对象跨行时缓冲累积）。"""
-    buffer = ""
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
+def _extract_chat_entries(json_path: str | Path) -> list[dict]:
+    """提取聊天 JSON 中全部普通文本消息，返回按时间排序的条目列表。
+
+    条目字段：ts（Unix 秒）、author、text（表情已转 [name] 形式）、
+    emojis（{name,url} 列表）、is_member。
+    """
+    entries: list[dict] = []
+    for obj in parse_objects_from_file(str(json_path)):
+        replay_action = obj.get("replayChatItemAction")
+        if not replay_action:
+            continue
+        for action in replay_action.get("actions", []):
+            add_item = action.get("addChatItemAction")
+            if not add_item:
                 continue
-            buffer += line
-            try:
-                obj = json.loads(buffer)
-                yield obj
-                buffer = ""
-            except json.JSONDecodeError:
+            item = add_item.get("item")
+            if not item:
                 continue
-        if buffer:
+            renderer = item.get("liveChatTextMessageRenderer")
+            if not renderer:
+                continue
+
+            timestamp_usec = renderer.get("timestampUsec")
+            if not timestamp_usec:
+                continue
             try:
-                obj = json.loads(buffer)
-                yield obj
-            except json.JSONDecodeError:
-                pass
+                ts = int(timestamp_usec) / 1_000_000
+            except (TypeError, ValueError):
+                continue
+
+            author_name = renderer.get("authorName", {}).get("simpleText", "")
+            is_member = is_membership_from_badges(renderer.get("authorBadges", []))
+            message_runs = renderer.get("message", {}).get("runs", [])
+            text, emojis = extract_message_runs(message_runs)
+            if not text and not emojis:
+                continue
+            text = _EMOJI_PATTERN.sub(lambda m: f"[{m.group(1)}]", text).strip()
+
+            entries.append({
+                "ts": ts,
+                "author": author_name,
+                "text": text,
+                "emojis": emojis,
+                "is_member": is_member,
+            })
+
+    entries.sort(key=lambda e: e["ts"])
+    return entries
+
+
+def chat_json_events(json_path: str | Path) -> tuple[list[DanmakuEvent], dict[str, str]]:
+    """把聊天 JSON 解析为弹幕事件列表与表情 URL 表。
+
+    时间为相对最早一条消息的秒数（与 XML 时间轴一致）。供压制、预览、
+    删除开头弹幕参照选择直接消费 JSON，无需先转 XML。
+    """
+    entries = _extract_chat_entries(json_path)
+    if not entries:
+        raise ValueError("未提取到任何弹幕消息")
+
+    base = entries[0]["ts"]
+    events = [
+        DanmakuEvent(
+            time=e["ts"] - base,
+            user=e["author"] or "匿名",
+            text=e["text"],
+            is_membership=e["is_member"],
+        )
+        for e in entries
+        if e["text"]
+    ]
+
+    emoji_map: dict[str, str] = {}
+    for e in entries:
+        for emo in e["emojis"]:
+            name = emo.get("name", "").strip(":")
+            url = emo.get("url", "")
+            if name and url and name not in emoji_map:
+                emoji_map[name] = url
+    return events, emoji_map
 
 
 def convert_chat_json(
@@ -184,52 +225,10 @@ def convert_chat_json(
     """
     if drop_first < 0:
         raise ValueError(f"删除条数不能为负数，当前 {drop_first}")
-    data_entries = []
-    for obj in parse_objects_from_file(str(json_path)):
-        replay_action = obj.get("replayChatItemAction")
-        if not replay_action:
-            continue
-        actions = replay_action.get("actions", [])
-        for action in actions:
-            add_item = action.get("addChatItemAction")
-            if not add_item:
-                continue
-            item = add_item.get("item")
-            if not item:
-                continue
-            renderer = item.get("liveChatTextMessageRenderer")
-            if not renderer:
-                continue
-
-            timestamp_usec = renderer.get("timestampUsec")
-            if not timestamp_usec:
-                continue
-            timestamp_str = parse_timestamp_usec(timestamp_usec)
-            if not timestamp_str:
-                continue
-
-            author_name = renderer.get("authorName", {}).get("simpleText", "")
-            badges = renderer.get("authorBadges", [])
-            is_member = is_membership_from_badges(badges)
-
-            message_runs = renderer.get("message", {}).get("runs", [])
-            text, emojis = extract_message_runs(message_runs)
-            if not text and not emojis:
-                continue
-
-            data_entries.append({
-                "timestamp": timestamp_str,
-                "author": author_name,
-                "message": text,
-                "customEmojis": emojis,
-                "isMembership": is_member,
-                "isVerified": False,
-            })
-
+    data_entries = _extract_chat_entries(json_path)
     if not data_entries:
         raise ValueError("未提取到任何弹幕消息")
 
-    data_entries.sort(key=lambda x: x["timestamp"])
     if drop_first:
         if drop_first >= len(data_entries):
             raise ValueError(
@@ -237,16 +236,13 @@ def convert_chat_json(
             )
         del data_entries[:drop_first]
 
-    first_time = data_entries[0]["timestamp"]
-    start_dt = (
-        datetime.fromisoformat(first_time.replace("Z", "+00:00"))
-        - timedelta(seconds=lead_in)
-    )
+    base_ts = data_entries[0]["ts"]
+    start_dt = datetime.fromtimestamp(base_ts - lead_in, tz=UTC)
 
     # 汇总唯一表情的名字与图片 URL，写入 <e> 标签供压制时按需下载
     emoji_map: dict[str, str] = {}
     for item in data_entries:
-        for emo in item.get("customEmojis", []):
+        for emo in item["emojis"]:
             name = emo.get("name", "").strip(":")
             url = emo.get("url", "")
             if name and url and name not in emoji_map:
@@ -257,16 +253,14 @@ def convert_chat_json(
         xml_lines.append(f'  <e name="{escape(name)}" url="{escape(url)}"/>')
 
     for item in data_entries:
-        msg_dt = datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00"))
-        offset = (msg_dt - start_dt).total_seconds()
+        offset = item["ts"] - base_ts + lead_in
         if offset < 0:
             continue
-        text = item.get("message", "").strip()
+        text = item["text"]
         if not text:
             continue
-        text = _EMOJI_PATTERN.sub(lambda m: f"[{m.group(1)}]", text)
-        member = "1" if item.get("isMembership", False) else "0"
-        author = item.get("author", "") or "匿名"
+        member = "1" if item["is_member"] else "0"
+        author = item["author"] or "匿名"
         xml_lines.append(
             f'  <d p="{offset:.1f},1,25,16777215,0,0,0,0" member="{member}" '
             f'user="{escape(author)}">{escape(text)}</d>'

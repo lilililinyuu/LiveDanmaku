@@ -168,3 +168,28 @@ def test_preview_json_events(tmp_path):
     limited = preview_json_events(str(src), limit=2)
     assert len(limited) == 2
     assert limited[0].text == "第一"
+
+
+def test_parse_subtitle_with_emoji_json(tmp_path):
+    """压制/预览应能直接消费聊天 JSON：事件时间相对首条，表情表齐全。"""
+    from danmakustudio.input.parser import parse_subtitle_with_emoji
+
+    src = tmp_path / "chat.json"
+    src.write_text(
+        _replay_line(1753357638681000, "u1", _text_runs("hi")) + "\n"
+        + _replay_line(
+            1753357640681000, "u2",
+            _text_runs("yo ") + _emoji_run(":face-blue-smiling:", "http://example.com/f.png"),
+            member=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    events, emoji_map = parse_subtitle_with_emoji(str(src))
+
+    assert len(events) == 2
+    assert events[0].time == pytest.approx(0.0)
+    assert events[1].time == pytest.approx(2.0)
+    assert events[1].is_membership is True
+    assert "[face-blue-smiling]" in events[1].text
+    assert emoji_map == {"face-blue-smiling": "http://example.com/f.png"}

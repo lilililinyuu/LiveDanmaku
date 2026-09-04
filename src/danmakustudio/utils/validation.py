@@ -12,7 +12,7 @@ from loguru import logger
 from ..errors import InputError
 
 SUPPORTED_VIDEO_EXTS = frozenset({".mp4", ".flv", ".mkv", ".avi", ".mov", ".ts", ".webm"})
-SUPPORTED_SUBTITLE_EXTS = frozenset({".xml", ".lrc"})
+SUPPORTED_SUBTITLE_EXTS = frozenset({".xml", ".lrc", ".json"})
 SUPPORTED_OUTPUT_EXTS = frozenset({".mp4", ".flv", ".mkv", ".avi", ".mov"})
 
 

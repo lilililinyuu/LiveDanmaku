@@ -107,3 +107,28 @@ def test_find_matching_subtitle_exact_beats_live_chat(tmp_path):
     (tmp_path / "直播.live_chat.xml").write_text("<i></i>", encoding="utf-8")
 
     assert find_matching_subtitle(video) == exact
+
+
+def test_find_matching_subtitle_json(tmp_path):
+    """同名 JSON（YouTube 聊天导出）可作为字幕与视频配对。"""
+    from danmakustudio.batch import find_matching_subtitle
+
+    video = tmp_path / "直播.mp4"
+    video.write_bytes(b"v")
+    sub = tmp_path / "直播.json"
+    sub.write_text("{}", encoding="utf-8")
+
+    assert find_matching_subtitle(video) == sub
+
+
+def test_find_matching_subtitle_prefers_xml_over_json(tmp_path):
+    """同名 XML 存在时应优先于 JSON。"""
+    from danmakustudio.batch import find_matching_subtitle
+
+    video = tmp_path / "直播.mp4"
+    video.write_bytes(b"v")
+    xml = tmp_path / "直播.xml"
+    xml.write_text("<i></i>", encoding="utf-8")
+    (tmp_path / "直播.json").write_text("{}", encoding="utf-8")
+
+    assert find_matching_subtitle(video) == xml

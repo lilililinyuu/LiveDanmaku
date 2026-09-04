@@ -668,7 +668,12 @@ class DanmakuStudioWindow(QWidget):
         if xml_path is None:
             return
         try:
-            events = parse_subtitle(str(xml_path))
+            if xml_path.suffix.lower() == ".json":
+                from ..input.chat2xml import preview_json_events
+
+                events = preview_json_events(str(xml_path))
+            else:
+                events = parse_subtitle(str(xml_path))
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, "提示", f"弹幕文件读取失败: {e}")
             return
@@ -691,9 +696,9 @@ class DanmakuStudioWindow(QWidget):
             return subtitle
         path_text, _ = QFileDialog.getOpenFileName(
             self,
-            "选择弹幕 XML/LRC",
+            "选择弹幕 XML/LRC/JSON",
             self.last_dir,
-            "弹幕文件 (*.xml *.lrc);;所有文件 (*)",
+            "弹幕文件 (*.xml *.lrc *.json);;所有文件 (*)",
         )
         return Path(path_text) if path_text else None
 
@@ -718,15 +723,15 @@ class DanmakuStudioWindow(QWidget):
             answer = QMessageBox.question(
                 self,
                 "未找到同名字幕",
-                f"未找到与 {video.name} 同名的 XML/LRC 字幕。\n是否手动选择弹幕文件？",
+                f"未找到与 {video.name} 同名的 XML/LRC/JSON 弹幕文件。\n是否手动选择？",
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
             subtitle_text, _ = QFileDialog.getOpenFileName(
                 self,
-                "选择弹幕 XML/LRC",
+                "选择弹幕 XML/LRC/JSON",
                 str(video.parent),
-                "弹幕文件 (*.xml *.lrc);;所有文件 (*)",
+                "弹幕文件 (*.xml *.lrc *.json);;所有文件 (*)",
             )
             if not subtitle_text:
                 return
