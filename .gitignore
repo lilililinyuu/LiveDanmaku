@@ -36,4 +36,7 @@ src.bak/
 /*.xml
 /chat.json
 /*.live_chat.json
+/*.ytdl
+/*.part-Frag*
+/*.part
 /已保存/

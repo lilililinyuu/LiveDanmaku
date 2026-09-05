@@ -84,7 +84,8 @@ def test_build_record_command_full(tmp_path):
     assert "-f" in cmd and "bestvideo+bestaudio/best" in cmd
     # 双流格式自动追加合并容器
     assert "--merge-output-format" in cmd and "mp4" in cmd
-    assert "--write-subs" in cmd and "--sub-langs" in cmd and "live_chat" in cmd
+    # 弹幕抓取拆分为独立进程，视频命令不含 --write-subs
+    assert "--write-subs" not in cmd and "--sub-langs" not in cmd
     assert "-o" in cmd
     assert cmd[-1] == "https://www.youtube.com/watch?v=abc"
     # -o 的值紧跟其后，指向输出目录
@@ -145,26 +146,29 @@ def test_record_session_stop_sends_ctrl_break(tmp_path, monkeypatch):
     session.start()
     session.stop()
 
-    assert session.process.signals[0] == _CTRL_BREAK
+    assert all(p.signals[0] == _CTRL_BREAK for p in session.processes)
 
 
 def test_record_session_save_snapshot(tmp_path, monkeypatch):
-    """保存片段应把当前输出文件复制到目标目录且不改变录制状态。"""
+    """保存片段：复制输出文件并剥离写入中后缀；分片临时文件排除。"""
     params = _params(tmp_path)
     session = RecordSession(params)
 
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
     session.start()
     (params.output_dir / "20260905_测试直播.mp4.part").write_bytes(b"x" * 64)
-    (params.output_dir / "20260905_测试直播.live_chat.json.part-Frag19").write_bytes(b"c")
+    (params.output_dir / "20260905_测试直播.live_chat.json").write_bytes(b"{}")
+    (params.output_dir / "20260905_测试直播.mp4.part-Frag19.part").write_bytes(b"junk")
 
     copied = session.save_snapshot()
 
+    # 分片临时文件（.part-Frag19）被排除；其余文件剥离 .part 后缀
     assert len(copied) == 2
     assert all("已保存" in str(f.parent) for f in copied)
-    # .part 与 .part-Frag19 后缀都应被剥离
-    assert all(not f.name.endswith(".part") and not f.name.endswith(".part-Frag19") for f in copied)
-    assert {f.stat().st_size for f in copied} == {64, 1}
+    assert all(
+        not f.name.endswith(".part") and ".part-Frag" not in f.name for f in copied
+    )
+    assert {f.stat().st_size for f in copied} == {64, 2}
 
 
 def test_record_session_double_start_raises(tmp_path, monkeypatch):
@@ -194,14 +198,66 @@ def test_snapshot_merge_fallback_keeps_raw_copies(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
     session.start()
-    video = params.output_dir / "直播.f137.mp4"
-    audio = params.output_dir / "直播.f140.m4a"
+    video = params.output_dir / "live.f137.mp4"
+    audio = params.output_dir / "live.f140.m4a"
     video.write_bytes(b"fake-video")
     audio.write_bytes(b"fake-audio")
 
     copied = session.save_snapshot()
 
     names = [f.name for f in copied]
-    # 合并失败时原始两个片段都被保留（mp4 + m4a）
-    assert any(n.endswith(".mp4") and n != "" for n in names)
+    assert any(n.endswith(".mp4") for n in names)
     assert any(n.endswith(".m4a") for n in names)
+
+
+def test_build_chat_command(tmp_path):
+    """弹幕进程命令：--skip-download + live_chat 抓取，不含视频格式。"""
+    cmd = build_record_command(_params(tmp_path), chat_only=True)
+    assert "--skip-download" in cmd
+    assert "--write-subs" in cmd and "--sub-langs" in cmd and "live_chat" in cmd
+    assert "-f" not in cmd
+    assert "--live-from-start" in cmd and "--proxy" in cmd
+
+
+def test_snapshot_merge_success_real_ffmpeg(tmp_path, monkeypatch):
+    """有真实 ffmpeg 时，分离音视频快照应合并为单个带音轨的 mp4。"""
+    import shutil as _shutil
+
+    if _shutil.which("ffmpeg") is None:
+        pytest.skip("需要 ffmpeg")
+
+    params = _params(tmp_path)
+    session = RecordSession(params)
+
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    video = staging / "live.f137.mp4"
+    audio = staging / "live.f140.m4a"
+    # 先用真实 ffmpeg 在暂存目录生成媒体文件
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", "testsrc=duration=0.5", "-pix_fmt", "yuv420p", str(video)],
+        check=True, **flags,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", "sine=duration=0.5", str(audio)],
+        check=True, **flags,
+    )
+
+    # 会话启动需要假 Popen；启动后把媒体文件"写"进输出目录（模拟录制中写盘）
+    with monkeypatch.context() as m:
+        m.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
+        session.start()
+    import shutil as _shutil2
+
+    _shutil2.copyfile(video, params.output_dir / "live.f137.mp4")
+    _shutil2.copyfile(audio, params.output_dir / "live.f140.m4a")
+
+    copied = session.save_snapshot()
+
+    # 原始两个片段被合并清理，只剩带音轨的 mp4
+    assert len(copied) == 1
+    assert copied[0].name.endswith("live.mp4")
+    assert copied[0].stat().st_size > 0
