@@ -759,3 +759,32 @@ def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
 
     assert window.drop_first_spin.value() == 0
     window.close()
+
+
+def test_trim_reference_dialog_count_adjustable(qapp, tmp_path):
+    """参照列表的显示条数应可通过「显示条数」调整（默认 50）。"""
+    from danmakustudio.input.parser import parse_subtitle
+
+    events = parse_subtitle(str(_write_numbered_xml(tmp_path, count=80)))
+
+    apply_theme(qapp)
+    dialog = TrimReferenceDialog(events)
+
+    assert dialog.count_spin.value() == 50
+    assert dialog.table.rowCount() == 50
+
+    dialog.count_spin.setValue(80)
+    assert dialog.table.rowCount() == 80
+
+    dialog.count_spin.setValue(10)
+    assert dialog.table.rowCount() == 10
+    assert dialog.table.rowCount() == dialog.count_spin.value()
+
+    dialog.close()
+
+
+def test_trim_reference_dialog_default_is_50(qapp):
+    """默认参照窗口应为 50 条。"""
+    from danmakustudio.ui.main_window import _TRIM_REF_WINDOW
+
+    assert _TRIM_REF_WINDOW == 50

@@ -60,23 +60,27 @@ from .theme import CheckMarkCheckBox, refresh_dynamic_style
 from .worker import BatchWorker, DownloadWorker
 
 # 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
-_TRIM_REF_WINDOW = 40
+_TRIM_REF_WINDOW = 50
 
 
 def parse_danmaku_preview_events(path: Path) -> list:
-    """按扩展名解析弹幕文件的前 40 条事件（JSON 走聊天解析）。"""
+    """按扩展名解析弹幕文件的全部事件（JSON 走聊天解析）。"""
     if path.suffix.lower() == ".json":
         from ..input.chat2xml import preview_json_events
 
-        return preview_json_events(str(path))
+        return preview_json_events(str(path), limit=None)
     return parse_subtitle(str(path))
 
 
 class TrimReferenceDialog(QDialog):
-    """从前 40 条弹幕中参照选择：保留一条，其之前的弹幕全部删除。"""
+    """参照选择：保留一条弹幕，其之前的弹幕全部删除。
+
+    列表展示条数可通过「显示条数」自行调整（默认 50 条）。
+    """
 
     def __init__(self, events, window_size: int = _TRIM_REF_WINDOW, parent: QWidget | None = None):
         super().__init__(parent)
+        self._events = list(events)
         self.setWindowTitle("删除开头弹幕 · 参照选择")
         self.setMinimumWidth(620)
         layout = QVBoxLayout(self)
@@ -86,8 +90,19 @@ class TrimReferenceDialog(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        rows = list(events)[:window_size]
-        self.table = QTableWidget(len(rows), 4, self)
+        count_row = QHBoxLayout()
+        count_row.setSpacing(8)
+        count_row.addWidget(QLabel("显示条数"))
+        self.count_spin = QSpinBox()
+        self.count_spin.setRange(1, max(1, len(self._events)))
+        self.count_spin.setValue(min(window_size, len(self._events)))
+        self.count_spin.setToolTip("参照列表展示的弹幕条数")
+        self.count_spin.valueChanged.connect(self._rebuild_table)
+        count_row.addWidget(self.count_spin)
+        count_row.addStretch(1)
+        layout.addLayout(count_row)
+
+        self.table = QTableWidget(0, 4, self)
         self.table.setHorizontalHeaderLabels(["序号", "时间", "用户", "内容"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -99,12 +114,7 @@ class TrimReferenceDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        for r, ev in enumerate(rows):
-            text = ev.text.replace("\n", " ").strip()
-            if len(text) > 60:
-                text = text[:60] + "…"
-            for col, value in enumerate((str(r + 1), f"{ev.time:.1f}s", ev.user, text)):
-                self.table.setItem(r, col, QTableWidgetItem(value))
+        self._fill_table(self.count_spin.value())
         self.table.selectRow(0)
         layout.addWidget(self.table)
 
@@ -121,6 +131,26 @@ class TrimReferenceDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _fill_table(self, count: int) -> None:
+        """按显示条数填充参照表格。"""
+        rows = self._events[:count]
+        self.table.setRowCount(len(rows))
+        for r, ev in enumerate(rows):
+            text = ev.text.replace("\n", " ").strip()
+            if len(text) > 60:
+                text = text[:60] + "…"
+            for col, value in enumerate((str(r + 1), f"{ev.time:.1f}s", ev.user, text)):
+                self.table.setItem(r, col, QTableWidgetItem(value))
+
+    def _rebuild_table(self, count: int) -> None:
+        """显示条数变化时重建表格，尽量保持原选中行。"""
+        selected = self.table.currentRow()
+        self._fill_table(count)
+        if 0 <= selected < self.table.rowCount():
+            self.table.selectRow(selected)
+        else:
+            self.table.selectRow(0)
 
     def _update_status(self, *_args) -> None:
         row = max(0, self.table.currentRow())
@@ -158,7 +188,7 @@ class TrimExportDialog(QDialog):
         self.count_spin.setToolTip("删除文件开头 N 条弹幕；0 = 不删除，仅按所选方式导出")
         count_row.addWidget(self.count_spin)
         self.btn_reference = QPushButton("参照选择…")
-        self.btn_reference.setToolTip("列出该文件的前 40 条弹幕，选择保留哪一条")
+        self.btn_reference.setToolTip("列出该文件开头的弹幕（默认 50 条，可在弹窗中调整），选择保留哪一条")
         self.btn_reference.clicked.connect(self._choose_reference)
         count_row.addWidget(self.btn_reference)
         count_row.addStretch(1)
@@ -385,11 +415,11 @@ class DanmakuStudioWindow(QWidget):
         self.drop_first_spin.setSuffix(" 条")
         self.drop_first_spin.setToolTip(
             "删除开头 N 条弹幕（如直播开始前发出的测试弹幕），0=不删除。"
-            "可点击「参照选择…」从前 40 条中指定保留哪一条。"
+            "可点击「参照选择…」从开头的弹幕中指定保留哪一条（默认展示 50 条，可调整）。"
         )
         self.btn_drop_reference = QPushButton("参照选择…")
         self.btn_drop_reference.setToolTip(
-            "列出弹幕文件的前 40 条（序号/时间/用户/内容），选择保留哪一条，其之前的弹幕全部删除"
+            "列出弹幕文件开头若干条（默认 50，可在弹窗中调整；序号/时间/用户/内容），选择保留哪一条，其之前的弹幕全部删除"
         )
         self.btn_drop_reference.clicked.connect(self.choose_drop_first_reference)
         drop_row.addWidget(self.drop_first_spin)
@@ -762,7 +792,7 @@ class DanmakuStudioWindow(QWidget):
         self.clip_start_spin.setEnabled(start_enabled)
 
     def choose_drop_first_reference(self) -> None:
-        """参照选择删除条数：从前 40 条里保留一条，之前的全部删除。"""
+        """参照选择删除条数：从开头的弹幕里保留一条，之前的全部删除。"""
         xml_path = self._reference_subtitle_path()
         if xml_path is None:
             return
@@ -1305,7 +1335,7 @@ class DanmakuStudioWindow(QWidget):
     def _ask_drop_first_for_json(self, chat_json: Path) -> int:
         """下载完成后询问：转换前是否删除 JSON 开头弹幕。
 
-        参照「压制设置 → 删除开头弹幕」的交互：列出 JSON 前 40 条
+        参照「压制设置 → 删除开头弹幕」的交互：列出 JSON 开头的弹幕
         （序号/时间/用户/内容）选择保留哪一条，其之前的全部删除。
         返回要删除的条数（0 = 不删除）。
         """

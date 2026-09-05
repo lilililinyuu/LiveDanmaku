@@ -29,16 +29,17 @@ def default_xml_path_for(json_path: str | Path) -> Path:
     return path.with_suffix(".xml")
 
 
-def preview_json_events(json_path: str | Path, limit: int = 40) -> list[DanmakuEvent]:
-    """提取聊天 JSON 开头的消息，供「删除开头弹幕」参照选择展示。
+def preview_json_events(json_path: str | Path, limit: int | None = None) -> list[DanmakuEvent]:
+    """提取聊天 JSON 的消息，供「删除开头弹幕」参照选择展示。
 
-    返回按时间排序的前 limit 条，时间为相对最早一条消息的秒数。
+    返回按时间排序的事件列表（时间为相对最早一条消息的秒数）；
+    limit 不为 None 时只返回前 limit 条。
     """
     try:
         events, _ = chat_json_events(json_path)
     except ValueError:
         return []
-    return events[:limit]
+    return events if limit is None else events[:limit]
 
 
 def parse_objects_from_file(filepath):
