@@ -156,13 +156,15 @@ def test_record_session_save_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
     session.start()
     (params.output_dir / "20260905_测试直播.mp4.part").write_bytes(b"x" * 64)
+    (params.output_dir / "20260905_测试直播.live_chat.json.part-Frag19").write_bytes(b"c")
 
     copied = session.save_snapshot()
 
-    assert len(copied) == 1
-    assert not copied[0].name.endswith(".part")
-    assert "已保存" in str(copied[0].parent)
-    assert copied[0].stat().st_size == 64
+    assert len(copied) == 2
+    assert all("已保存" in str(f.parent) for f in copied)
+    # .part 与 .part-Frag19 后缀都应被剥离
+    assert all(not f.name.endswith(".part") and not f.name.endswith(".part-Frag19") for f in copied)
+    assert {f.stat().st_size for f in copied} == {64, 1}
 
 
 def test_record_session_double_start_raises(tmp_path, monkeypatch):

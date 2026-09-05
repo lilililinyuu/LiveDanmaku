@@ -180,8 +180,7 @@ class RecordSession:
         stamp = time.strftime("%Y%m%d_%H%M%S")
         copied: list[Path] = []
         for src in self.current_files():
-            name = src.name
-            name = name.removesuffix(".part")
+            name = re.sub(r"\.part(-Frag\d+)?$", "", src.name)
             dst = target / f"{stamp}_{name}"
             shutil.copyfile(src, dst)
             copied.append(dst)
