@@ -939,7 +939,7 @@ class DanmakuStudioWindow(QWidget):
 
         files = info.get("files", [])
         chat = info.get("chat")
-        self.append_log(f"录制结束（退出码 {info.get('returncode')}），共 {len(files)} 个文件:")
+        self.append_log(f"录制结束（退出码 {info.get('returncode')}），产出文件:")
         for f in files:
             self.append_log(f"  {f}")
         self.summary_label.setText(f"录制完成: {len(files)} 个文件")

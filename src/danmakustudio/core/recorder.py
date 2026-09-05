@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import signal
@@ -252,6 +253,63 @@ class RecordSession:
                 copied = [f for f in copied if f not in media] + [merged]
         return copied
 
+    def chat_file(self) -> Path | None:
+        """返回当前会话的弹幕 JSON 文件（可能仍是 .part 形态）。"""
+        for src in self.current_files():
+            if ".live_chat.json" in src.name.lower():
+                return src
+        return None
+
+    def finalize(self) -> dict[str, Path | None]:
+        """录制结束后整理产物。
+
+        处理被强制终止时遗留的写入中文件：
+        - 成对的视频/音频 .fNNN.mp4(.part) 用 ffmpeg -c copy 合并为
+          <base>.mp4（带音轨）；
+        - 弹幕 xxx.live_chat.json(.part) 改名为 xxx.live_chat.json；
+        - .ytdl 期刊删除。
+
+        返回 {"video": 成品视频路径或 None, "chat": 弹幕路径或 None}。
+        """
+        video_out: Path | None = None
+        chat_out: Path | None = None
+        media: list[Path] = []
+        # .ytdl 期刊被 current_files 过滤，需单独清理
+        for journal in self.params.output_dir.glob("*.ytdl"):
+            journal.unlink(missing_ok=True)
+        for src in self.current_files():
+            name = src.name
+            lower = name.lower()
+            if lower.endswith(".ytdl"):
+                src.unlink(missing_ok=True)
+                continue
+            if ".live_chat.json" in lower:
+                if lower.endswith(".part"):
+                    renamed = src.with_name(name[: -len(".part")])
+                    os.replace(src, renamed)
+                    chat_out = renamed
+                else:
+                    chat_out = src
+                continue
+            clean = src.with_name(re.sub(r"\.part$", "", name))
+            if clean != src:
+                os.replace(src, clean)
+            if re.search(r"\.f\d+\.(mp4|m4a)$", clean.name, re.IGNORECASE):
+                media.append(clean)
+            elif video_out is None:
+                video_out = clean   # 单文件格式（如 best）直接是成品
+        if len(media) >= 2:
+            merged = self._merge_media(media, self.params.output_dir)
+            if merged is not None:
+                for m in media:
+                    m.unlink(missing_ok=True)
+                video_out = merged
+            else:
+                video_out = media[0]
+        elif media:
+            video_out = media[0]
+        return {"video": video_out, "chat": chat_out}
+
     def _merge_media(self, media: list[Path], target: Path) -> Path | None:
         """把分离的音视频快照用 ffmpeg -c copy 合并为单个 mp4（秒级完成）。
 
@@ -287,3 +345,84 @@ class RecordSession:
     @property
     def total_size(self) -> int:
         return sum(_safe_size(p) for p in self.current_files())
+
+def backfill_chat_replay(
+    url: str,
+    output_dir: Path,
+    template: str,
+    *,
+    proxy: str = "",
+    pot_token_script: str = "",
+    current_size: int = 0,
+    on_output: Callable[[str], None] | None = None,
+    timeout: float = 900.0,
+) -> Path | None:
+    """直播结束后补全从头开始的完整弹幕回放。
+
+    YouTube 仅在直播结束后提供整场弹幕回放。把完整 live_chat.json 下载到
+    输出目录的「弹幕回放」子目录，仅当其比实时捕获的部分（current_size）
+    更大时才替换并返回路径；否则返回 None（保留现有文件）。
+    """
+    replay_dir = output_dir / "弹幕回放"
+    replay_dir.mkdir(parents=True, exist_ok=True)
+    cmd = ["yt-dlp", "--newline", "--skip-download", "--write-subs",
+           "--sub-langs", "live_chat"]
+    if proxy:
+        cmd += ["--proxy", proxy]
+    if pot_token_script:
+        cmd += [
+            "--extractor-args",
+            f"youtubepot-bgutilscript:script_path={pot_token_script}",
+        ]
+    cmd += ["-o", str(replay_dir / template), url]
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=_CREATE_NO_WINDOW,
+    )
+    stdout_pipe = process.stdout
+    stderr_pipe = process.stderr
+    assert stdout_pipe is not None and stderr_pipe is not None
+
+    def _drain(stream, pref):
+        for raw in stream:
+            line_str = raw.strip()
+            if line_str and on_output is not None:
+                on_output(pref + line_str)
+
+    threading.Thread(target=_drain, args=(stdout_pipe, ""), daemon=True).start()
+    threading.Thread(
+        target=_drain, args=(stderr_pipe, "[yt-dlp] "), daemon=True
+    ).start()
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        logger.warning("弹幕回放下载超时（{} 秒），保留实时弹幕", timeout)
+        process.kill()
+        return None
+    if returncode != 0:
+        logger.warning("弹幕回放下载失败（退出码 {}）", returncode)
+        return None
+
+    replays = [
+        f for f in replay_dir.iterdir()
+        if f.is_file() and ".live_chat.json" in f.name.lower()
+    ]
+    if not replays:
+        logger.warning("回放目录中未找到弹幕 JSON")
+        return None
+    best = max(replays, key=lambda f: f.stat().st_size)
+    if best.stat().st_size <= current_size:
+        logger.info("回放弹幕不比实时捕获的部分大，保留实时弹幕")
+        shutil.rmtree(replay_dir, ignore_errors=True)
+        return None
+    target = output_dir / best.name
+    os.replace(best, target)
+    shutil.rmtree(replay_dir, ignore_errors=True)
+    logger.info("已用完整回放弹幕替换: {}", target)
+    return target

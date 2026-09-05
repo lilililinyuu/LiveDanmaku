@@ -269,7 +269,7 @@ class RecordWorker(QThread):
         self.session = None
 
     def run(self) -> None:
-        from ..core.recorder import RecordSession
+        from ..core.recorder import RecordSession, backfill_chat_replay
 
         session = RecordSession(self.params)
         self.session = session
@@ -280,14 +280,35 @@ class RecordWorker(QThread):
             self.failed.emit(f"录制启动失败: {e}")
             return
 
-        files = session.current_files()
-        chat = next(
-            (f for f in files if f.name.endswith(".live_chat.json")), None
-        )
+        # 整理中断产物：合并分离音视频、归位弹幕 JSON、清理期刊
+        final = session.finalize()
+        video = final.get("video")
+        chat = final.get("chat")
+
+        # 直播结束后 YouTube 才提供从头开始的弹幕回放；自动补全完整弹幕
+        if self.params.record_chat and chat is not None:
+            self.log.emit("正在获取从头开始的完整弹幕回放…（直播结束后可用）")
+            full = backfill_chat_replay(
+                self.params.url,
+                self.params.output_dir,
+                self.params.output_template,
+                proxy=self.params.proxy,
+                pot_token_script=self.params.pot_token_script,
+                current_size=chat.stat().st_size if chat.exists() else 0,
+                on_output=self.log.emit,
+            )
+            if full is not None:
+                chat = full
+                self.log.emit(f"已获取完整弹幕回放: {chat.name}")
+            else:
+                self.log.emit("未获取到更完整的回放弹幕，保留录制时的实时弹幕。")
+
+        files = [p for p in (video, chat) if p is not None]
         self.finished_rec.emit({
             "returncode": returncode,
             "files": files,
             "chat": chat,
+            "video": video,
         })
 
     def stop_recording(self, timeout: float = 30.0) -> None:

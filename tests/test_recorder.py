@@ -58,15 +58,16 @@ class _FakePopen:
         self.returncode = 0
         return 0
 
+    def communicate(self, *args, **kwargs):
+        self.returncode = 0
+        return (b"", b"")
+
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         self.returncode = 0
         return False
-
-    def communicate(self, *args, **kwargs):
-        return (b"", b"")
 
 
 def test_build_record_command_full(tmp_path):
@@ -112,6 +113,15 @@ def test_build_record_command_minimal(tmp_path):
     assert "--merge-output-format" not in cmd
 
 
+def test_build_chat_command(tmp_path):
+    """弹幕进程命令：--skip-download + live_chat 抓取，不含视频格式。"""
+    cmd = build_record_command(_params(tmp_path), chat_only=True)
+    assert "--skip-download" in cmd
+    assert "--write-subs" in cmd and "--sub-langs" in cmd and "live_chat" in cmd
+    assert "-f" not in cmd
+    assert "--live-from-start" in cmd and "--proxy" in cmd
+
+
 def test_record_session_streams_output_and_tracks_files(tmp_path, monkeypatch):
     """录制进程的输出行应回调给 on_output，新文件应被跟踪。"""
     params = _params(tmp_path)
@@ -138,7 +148,7 @@ def test_record_session_streams_output_and_tracks_files(tmp_path, monkeypatch):
 
 
 def test_record_session_stop_sends_ctrl_break(tmp_path, monkeypatch):
-    """停止录制应先发送 CTRL_BREAK 优雅收尾。"""
+    """停止录制应对全部录制进程发送 CTRL_BREAK 优雅收尾。"""
     params = _params(tmp_path)
     session = RecordSession(params)
 
@@ -210,17 +220,46 @@ def test_snapshot_merge_fallback_keeps_raw_copies(tmp_path, monkeypatch):
     assert any(n.endswith(".m4a") for n in names)
 
 
-def test_build_chat_command(tmp_path):
-    """弹幕进程命令：--skip-download + live_chat 抓取，不含视频格式。"""
-    cmd = build_record_command(_params(tmp_path), chat_only=True)
-    assert "--skip-download" in cmd
-    assert "--write-subs" in cmd and "--sub-langs" in cmd and "live_chat" in cmd
-    assert "-f" not in cmd
-    assert "--live-from-start" in cmd and "--proxy" in cmd
-
-
 def test_snapshot_merge_success_real_ffmpeg(tmp_path, monkeypatch):
     """有真实 ffmpeg 时，分离音视频快照应合并为单个带音轨的 mp4。"""
+    import shutil as _shutil
+
+    if _shutil.which("ffmpeg") is None:
+        pytest.skip("需要 ffmpeg")
+
+    params = _params(tmp_path)
+    session = RecordSession(params)
+    params.output_dir.mkdir(parents=True, exist_ok=True)
+
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    # 会话先启动（快照为空），媒体文件随后"写盘"——与真实录制时序一致
+    with monkeypatch.context() as m:
+        m.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
+        session.start()
+
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", "testsrc=duration=0.5", "-pix_fmt", "yuv420p",
+         str(params.output_dir / "live.f137.mp4")],
+        check=True, **flags,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", "sine=duration=0.5",
+         str(params.output_dir / "live.f140.m4a")],
+        check=True, **flags,
+    )
+
+    copied = session.save_snapshot()
+
+    # 原始两个片段被合并清理，只剩带音轨的 mp4
+    assert len(copied) == 1
+    assert copied[0].name.endswith("live.mp4")
+    assert copied[0].stat().st_size > 0
+
+
+def test_finalize_merges_and_renames(tmp_path, monkeypatch):
+    """finalize 应合并双流 .part、归位弹幕 JSON、清理期刊文件。"""
     import shutil as _shutil
 
     if _shutil.which("ffmpeg") is None:
@@ -232,32 +271,52 @@ def test_snapshot_merge_success_real_ffmpeg(tmp_path, monkeypatch):
     flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     staging = tmp_path / "staging"
     staging.mkdir()
-    video = staging / "live.f137.mp4"
-    audio = staging / "live.f140.m4a"
-    # 先用真实 ffmpeg 在暂存目录生成媒体文件
+    # ffmpeg 无法推断 .part 扩展名的输出封装器，先生成到暂存目录再改名
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
-         "-i", "testsrc=duration=0.5", "-pix_fmt", "yuv420p", str(video)],
+         "-i", "testsrc=duration=0.5", "-pix_fmt", "yuv420p",
+         str(staging / "v.mp4")],
         check=True, **flags,
     )
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
-         "-i", "sine=duration=0.5", str(audio)],
+         "-i", "sine=duration=0.5", str(staging / "a.m4a")],
         check=True, **flags,
     )
 
-    # 会话启动需要假 Popen；启动后把媒体文件"写"进输出目录（模拟录制中写盘）
+    # 会话启动需要假 Popen（context 限定，finalize 的合并用真实 ffmpeg）
     with monkeypatch.context() as m:
         m.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
-        session.start()
-    import shutil as _shutil2
+        session.start()   # 记录 _before（此时输出目录为空）
 
-    _shutil2.copyfile(video, params.output_dir / "live.f137.mp4")
-    _shutil2.copyfile(audio, params.output_dir / "live.f140.m4a")
+    # 模拟录制中写盘：媒体以 .part 形态出现在输出目录
+    _shutil.copyfile(staging / "v.mp4", params.output_dir / "直播.f299.mp4.part")
+    _shutil.copyfile(staging / "a.m4a", params.output_dir / "直播.f140.m4a.part")
+    chat = params.output_dir / "直播.live_chat.json.part"
+    chat.write_text('{"replay": true}', encoding="utf-8")
+    (params.output_dir / "直播.ytdl").write_bytes(b"")
 
-    copied = session.save_snapshot()
+    result = session.finalize()
 
-    # 原始两个片段被合并清理，只剩带音轨的 mp4
-    assert len(copied) == 1
-    assert copied[0].name.endswith("live.mp4")
-    assert copied[0].stat().st_size > 0
+    # 双流合并为带音轨的 mp4；弹幕归位；期刊删除
+    assert result["video"] is not None and result["video"].name == "直播.mp4"
+    assert result["video"].stat().st_size > 0
+    assert result["chat"] is not None and result["chat"].name == "直播.live_chat.json"
+    assert not (params.output_dir / "直播.f299.mp4.part").exists()
+    assert not (params.output_dir / "直播.f140.m4a.part").exists()
+    assert not (params.output_dir / "直播.ytdl").exists()
+
+
+def test_finalize_without_merge(tmp_path, monkeypatch):
+    """合并失败（假媒体）时保留剥离 .part 后的单流文件与弹幕。"""
+    params = _params(tmp_path)
+    session = RecordSession(params)
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
+    session.start()
+    (params.output_dir / "直播.f299.mp4.part").write_bytes(b"fake")
+    (params.output_dir / "直播.live_chat.json.part").write_text("{}", encoding="utf-8")
+
+    result = session.finalize()
+
+    assert result["video"] is not None and result["video"].name == "直播.f299.mp4"
+    assert result["chat"] is not None and result["chat"].name == "直播.live_chat.json"
