@@ -177,6 +177,24 @@ class SystemParams:
             )
 
 
+@dataclass(frozen=True)
+class RecorderParams:
+    """直播录制参数配置"""
+    proxy: str = "socks5://127.0.0.1:7897"   # 代理；空字符串 = 不使用
+    pot_token_script: str = r"D:\youtube-video-download\bgutil-pot.exe"
+    fmt: str = "bestvideo+bestaudio/best"      # 优先双流+合并，无双流时回退单文件
+    output_template: str = "%(upload_date)s_%(title)s.%(ext)s"
+    live_from_start: bool = True               # 从直播开头录制
+    record_chat: bool = True                   # 同步录制弹幕 JSON
+    monitor_interval: float = 60.0             # 频道开播探测间隔（秒）
+
+    def __post_init__(self):
+        if self.monitor_interval <= 0:
+            raise ValueError(f"monitor_interval 必须 > 0，当前 {self.monitor_interval}")
+        if not self.fmt:
+            raise ValueError("fmt 不能为空字符串")
+
+
 # =============================================================================
 # 聚合配置
 # =============================================================================
@@ -189,6 +207,7 @@ class DanmakuConfig:
     animation: AnimationParams = field(default_factory=AnimationParams)
     encode: EncodeParams = field(default_factory=EncodeParams)
     system: SystemParams = field(default_factory=SystemParams)
+    recorder: RecorderParams = field(default_factory=RecorderParams)
 
 
 # =============================================================================

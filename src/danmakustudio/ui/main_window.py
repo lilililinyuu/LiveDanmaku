@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -38,7 +39,14 @@ from PySide6.QtWidgets import (
 
 from ..batch import BatchJob, collect_batch_jobs, find_matching_subtitle
 from ..config.loader import config_to_yaml, load_config
-from ..config.models import DanmakuConfig, EncodeMode, apply_style_overrides
+from ..core.recorder import RecordParams
+from ..config.models import (
+    DEFAULT_CONFIG,
+    DanmakuConfig,
+    EncodeMode,
+    RecorderParams,
+    apply_style_overrides,
+)
 from ..errors import DanmakuStudioError
 from ..input.parser import parse_subtitle
 from ..input.trim import (
@@ -57,7 +65,7 @@ from ._shared import (
 from .file_picker import FileFolderPickerDialog
 from .style_panel import StylePanel
 from .theme import CheckMarkCheckBox, refresh_dynamic_style
-from .worker import BatchWorker, DownloadWorker
+from .worker import BatchWorker, DownloadWorker, MonitorWorker, RecordWorker
 
 # 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
 _TRIM_REF_WINDOW = 50
@@ -251,6 +259,9 @@ class DanmakuStudioWindow(QWidget):
         self.setMinimumSize(900, 640)
         self.worker: BatchWorker | None = None
         self.download_worker: DownloadWorker | None = None
+        self.record_worker = None
+        self.monitor_worker = None
+        self._record_started_at = 0.0
         self.pending_jobs: list[BatchJob] = []
         self.sidebar_collapsed = False
         self.last_dir = str(get_app_dir())
@@ -455,6 +466,7 @@ class DanmakuStudioWindow(QWidget):
         self.pages.addWidget(self._wrap_scroll(style_card))
         self.pages.addWidget(self._build_json_page())
         self.pages.addWidget(self._build_download_page())
+        self.pages.addWidget(self._build_record_page())
 
         sidebar = self._build_sidebar()
         self.nav_list.currentRowChanged.connect(self.pages.setCurrentIndex)
@@ -534,6 +546,11 @@ class DanmakuStudioWindow(QWidget):
         main_split.setStretchFactor(1, 0)
         main_split.setSizes([500, 290])
         layout.addWidget(main_split, 1)
+
+        self._record_timer = QTimer(self)
+        self._record_timer.setInterval(1000)
+        self._record_timer.timeout.connect(self._update_record_status)
+        self._record_timer.start()
 
         self._reload_style_panel()
         self.style_panel.restore_state()
@@ -630,7 +647,7 @@ class DanmakuStudioWindow(QWidget):
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("navList")
-        for label in ("压制设置", "弹幕样式", "JSON 转 XML", "下载内容"):
+        for label in ("压制设置", "弹幕样式", "JSON 转 XML", "下载内容", "直播录制"):
             self.nav_list.addItem(label)
         self.nav_list.setCurrentRow(0)
         side_layout.addWidget(self.nav_list)
@@ -716,6 +733,299 @@ class DanmakuStudioWindow(QWidget):
         action_row.addStretch(1)
         layout.addLayout(action_row)
         return self._hug_content_page(card)
+
+    def _build_record_page(self) -> QWidget:
+        """「直播录制」功能页：录制进行中的直播 / 监控频道开播自动录制。"""
+        try:
+            recorder = load_config(self.config_edit.text().strip() or None).recorder
+        except (DanmakuStudioError, AttributeError):
+            recorder = DEFAULT_CONFIG.recorder
+
+        card = QFrame()
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("直播录制")
+        title.setObjectName("sectionTitle")
+        description = QLabel(
+            "用 yt-dlp 录制直播：可录制进行中的直播（支持从开头录制），"
+            "也可监控频道、开播时自动开始录制；录制中可随时保存已录制的片段。"
+        )
+        description.setObjectName("sectionDescription")
+        description.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(description)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.record_url_edit = QLineEdit()
+        self.record_url_edit.setPlaceholderText(
+            "直播 URL / 视频 URL；监控开播请填频道链接（如 https://www.youtube.com/@handle）"
+        )
+        form.addRow("地址", self.record_url_edit)
+
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(8)
+        self.record_dir_edit = QLineEdit()
+        self.record_dir_edit.setPlaceholderText("录制输出目录")
+        self.record_dir_edit.setText(self.last_dir)
+        self.btn_record_browse = QPushButton("浏览…")
+        self.btn_record_browse.clicked.connect(self.browse_record_dir)
+        dir_row.addWidget(self.record_dir_edit, 1)
+        dir_row.addWidget(self.btn_record_browse)
+        form.addRow("输出目录", dir_row)
+
+        self.record_fmt_edit = QLineEdit(recorder.fmt)
+        self.record_fmt_edit.setToolTip(
+            "单文件格式（如 best）录制中即为完整可播放文件，"
+            "随时保存片段才能得到带音轨的内容；也可改写为其它 yt-dlp 格式"
+        )
+        form.addRow("格式 (-f)", self.record_fmt_edit)
+
+        opts_row = QHBoxLayout()
+        opts_row.setSpacing(12)
+        self.record_live_from_start_check = CheckMarkCheckBox("从直播开头录制")
+        self.record_live_from_start_check.setChecked(recorder.live_from_start)
+        self.record_live_from_start_check.setToolTip(
+            "--live-from-start：从直播开头录制；对不支持回放的直播自动忽略"
+        )
+        opts_row.addWidget(self.record_live_from_start_check)
+        self.record_chat_check = CheckMarkCheckBox("同步录制弹幕 JSON")
+        self.record_chat_check.setChecked(recorder.record_chat)
+        self.record_chat_check.setToolTip(
+            "录制时附带抓取 live_chat 弹幕，结束后可直接转 XML 压制"
+        )
+        opts_row.addWidget(self.record_chat_check)
+        opts_row.addStretch(1)
+        form.addRow("选项", opts_row)
+
+        self.record_proxy_edit = QLineEdit(recorder.proxy)
+        self.record_proxy_edit.setPlaceholderText("留空 = 不使用代理")
+        self.record_proxy_edit.setToolTip("yt-dlp --proxy，例如 socks5://127.0.0.1:7897")
+        form.addRow("代理", self.record_proxy_edit)
+
+        self.record_pot_edit = QLineEdit(recorder.pot_token_script)
+        self.record_pot_edit.setPlaceholderText("bgutil-pot 路径（留空 = 不传）")
+        self.record_pot_edit.setToolTip(
+            '以 --extractor-args "youtubepot-bgutilscript:script_path=…" 传入'
+        )
+        form.addRow("PO Token", self.record_pot_edit)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        self.btn_record_start = QPushButton("开始录制")
+        self.btn_record_start.setObjectName("primaryButton")
+        self.btn_record_start.clicked.connect(self.start_recording)
+        btn_row.addWidget(self.btn_record_start)
+        self.btn_record_stop = QPushButton("停止录制")
+        self.btn_record_stop.setToolTip("结束录制并保留已录制的文件")
+        self.btn_record_stop.setEnabled(False)
+        self.btn_record_stop.clicked.connect(self.stop_recording)
+        btn_row.addWidget(self.btn_record_stop)
+        self.btn_record_save = QPushButton("保存当前片段")
+        self.btn_record_save.setToolTip(
+            "把已录制的部分复制一份保存（默认保存到 输出目录/已保存/），不中断录制"
+        )
+        self.btn_record_save.setEnabled(False)
+        self.btn_record_save.clicked.connect(self.save_record_snapshot)
+        btn_row.addWidget(self.btn_record_save)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        monitor_row = QHBoxLayout()
+        monitor_row.setSpacing(10)
+        self.btn_monitor_start = QPushButton("监控此频道开播（自动录制）")
+        self.btn_monitor_start.setToolTip(
+            "周期探测该频道是否开播，开播时自动开始录制（间隔见配置 recorder.monitor_interval）"
+        )
+        self.btn_monitor_start.clicked.connect(self.start_monitor)
+        monitor_row.addWidget(self.btn_monitor_start)
+        self.btn_monitor_stop = QPushButton("停止监控")
+        self.btn_monitor_stop.setEnabled(False)
+        self.btn_monitor_stop.clicked.connect(self.stop_monitor)
+        monitor_row.addWidget(self.btn_monitor_stop)
+        monitor_row.addStretch(1)
+        layout.addLayout(monitor_row)
+
+        self.record_status_label = QLabel("未在录制")
+        self.record_status_label.setObjectName("fieldHint")
+        layout.addWidget(self.record_status_label)
+        layout.addStretch(1)
+        return self._hug_content_page(card)
+
+    def browse_record_dir(self) -> None:
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "选择录制输出目录",
+            self.record_dir_edit.text().strip() or self.last_dir,
+        )
+        if dir_path:
+            self.record_dir_edit.setText(dir_path)
+            self._remember_selection_dir([dir_path], self.last_dir)
+
+    def _record_params(self, url: str) -> RecordParams:
+        """按界面当前设置构造录制参数（core.recorder.RecordParams）。"""
+        return RecordParams(
+            url=url,
+            output_dir=Path(self.record_dir_edit.text().strip() or self.last_dir),
+            fmt=self.record_fmt_edit.text().strip() or "best",
+            live_from_start=self.record_live_from_start_check.isChecked(),
+            proxy=self.record_proxy_edit.text().strip(),
+            pot_token_script=self.record_pot_edit.text().strip(),
+            record_chat=self.record_chat_check.isChecked(),
+        )
+
+    def _begin_record(self, params: RecordParams) -> None:
+        self.record_url_edit.setText(params.url)
+        self.btn_record_start.setEnabled(False)
+        self.btn_record_stop.setEnabled(True)
+        self.btn_record_save.setEnabled(True)
+        self.btn_monitor_start.setEnabled(False)
+        self._set_status("录制中", "busy")
+        self._record_started_at = time.perf_counter()
+        self.append_log("")
+        self.append_log(f"开始录制: {params.url}")
+        self.append_log(f"  输出目录: {params.output_dir}")
+        self.record_worker = RecordWorker(params)
+        self.record_worker.log.connect(self.append_log)
+        self.record_worker.finished_rec.connect(self._on_record_finished)
+        self.record_worker.failed.connect(self._on_record_failed)
+        self.record_worker.start()
+
+    def start_recording(self) -> None:
+        """录制当前输入的直播/视频地址。"""
+        if self.record_worker is not None and self.record_worker.isRunning():
+            QMessageBox.warning(self, "提示", "已有录制在进行中。")
+            return
+        url = self.record_url_edit.text().strip()
+        if not url:
+            QMessageBox.warning(self, "提示", "请输入直播或视频地址。")
+            return
+        self._begin_record(self._record_params(url))
+
+    def stop_recording(self) -> None:
+        """优雅停止录制（等待 yt-dlp 收尾，保留文件）。"""
+        if self.record_worker is None or not self.record_worker.isRunning():
+            return
+        self.append_log("正在停止录制（等待 yt-dlp 收尾）…")
+        self.btn_record_stop.setEnabled(False)
+        self.record_worker.stop_recording()
+
+    def save_record_snapshot(self) -> None:
+        """把已录制的部分复制保存一份，不中断录制。"""
+        if self.record_worker is None or not self.record_worker.isRunning():
+            QMessageBox.warning(self, "提示", "当前没有正在进行的录制。")
+            return
+        copied = self.record_worker.save_snapshot()
+        if copied:
+            for path in copied:
+                self.append_log(f"  已保存片段: {path}")
+            self.summary_label.setText(
+                f"已保存 {len(copied)} 个文件（录制未中断）"
+            )
+        else:
+            self.summary_label.setText("尚无已录制内容可保存")
+
+    def _on_record_finished(self, info: dict) -> None:
+        """录制结束（自然结束或手动停止）：展示结果并询问弹幕处理。"""
+        self.btn_record_start.setEnabled(True)
+        self.btn_record_stop.setEnabled(False)
+        self.btn_record_save.setEnabled(False)
+        self.btn_monitor_start.setEnabled(True)
+        self._set_status("等待任务", "idle")
+        self.record_status_label.setText("未在录制")
+
+        files = info.get("files", [])
+        chat = info.get("chat")
+        self.append_log(f"录制结束（退出码 {info.get('returncode')}），共 {len(files)} 个文件:")
+        for f in files:
+            self.append_log(f"  {f}")
+        self.summary_label.setText(f"录制完成: {len(files)} 个文件")
+
+        if chat is not None and chat.exists() and chat.stat().st_size > 0:
+            answer = QMessageBox.question(
+                self,
+                "转换弹幕",
+                "录制包含弹幕 JSON，是否转换为 XML 并加入任务队列？",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self._convert_chat_json_and_adopt(chat)
+
+    def _on_record_failed(self, message: str) -> None:
+        self.btn_record_start.setEnabled(True)
+        self.btn_record_stop.setEnabled(False)
+        self.btn_record_save.setEnabled(False)
+        self.btn_monitor_start.setEnabled(True)
+        self._set_status("录制失败", "error")
+        self.append_log(f"录制失败: {message}")
+        self.record_status_label.setText("未在录制")
+        QMessageBox.critical(self, "录制失败", message)
+
+    def _update_record_status(self) -> None:
+        worker = self.record_worker
+        if worker is None or not worker.isRunning() or worker.session is None:
+            return
+        elapsed = int(time.perf_counter() - self._record_started_at)
+        size_mb = worker.session.total_size / (1024 * 1024)
+        self.record_status_label.setText(
+            f"录制中：已录 {format_duration(elapsed)}，当前文件 {size_mb:.1f} MB"
+        )
+
+    def start_monitor(self) -> None:
+        """开始监控频道开播，开播时自动开始录制。"""
+        if self.monitor_worker is not None and self.monitor_worker.isRunning():
+            QMessageBox.warning(self, "提示", "监控已在进行中。")
+            return
+        url = self.record_url_edit.text().strip()
+        if not url:
+            QMessageBox.warning(self, "提示", "请输入频道链接或直播地址。")
+            return
+        try:
+            recorder = load_config(self.config_edit.text().strip() or None).recorder
+        except DanmakuStudioError:
+            recorder = DEFAULT_CONFIG.recorder
+        self.monitor_worker = MonitorWorker(
+            url,
+            recorder.monitor_interval,
+            proxy=self.record_proxy_edit.text().strip(),
+            pot_token_script=self.record_pot_edit.text().strip(),
+        )
+        self.monitor_worker.log.connect(self.append_log)
+        self.monitor_worker.failed.connect(self._on_monitor_failed)
+        self.monitor_worker.live_found.connect(self._on_monitor_live_found)
+        self.monitor_worker.monitor_finished.connect(self._on_monitor_finished)
+        self.btn_monitor_start.setEnabled(False)
+        self.btn_monitor_stop.setEnabled(True)
+        self._set_status("监控中", "ready")
+        self.monitor_worker.start()
+
+    def stop_monitor(self) -> None:
+        if self.monitor_worker is not None:
+            self.monitor_worker.stop_monitor()
+            self.append_log("正在停止监控…")
+
+    def _on_monitor_finished(self) -> None:
+        self.btn_monitor_start.setEnabled(True)
+        self.btn_monitor_stop.setEnabled(False)
+        if self.record_worker is None or not self.record_worker.isRunning():
+            self._set_status("等待任务", "idle")
+
+    def _on_monitor_live_found(self, url: str, title: str) -> None:
+        """监控到开播：自动开始录制（已有录制时跳过）。"""
+        self.append_log(f"检测到直播开播: {title}（{url}）")
+        if self.record_worker is not None and self.record_worker.isRunning():
+            self.append_log("已有录制进行中，跳过自动录制。")
+            return
+        self._begin_record(self._record_params(url))
+
+    def _on_monitor_failed(self, message: str) -> None:
+        self.btn_monitor_start.setEnabled(True)
+        self.btn_monitor_stop.setEnabled(False)
+        self._set_status("监控失败", "error")
+        self.append_log(f"监控失败: {message}")
+        QMessageBox.critical(self, "监控失败", message)
 
     def _hug_content_page(self, card: QWidget) -> QWidget:
         """功能页容器：卡片贴内容高度，避免大片空白卡片。"""

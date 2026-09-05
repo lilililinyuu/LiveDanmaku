@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
@@ -249,3 +250,103 @@ class DownloadWorker(QThread):
             self.failed.emit(f"下载失败: {e}")
         else:
             self.succeeded.emit(result)
+
+
+class RecordWorker(QThread):
+    """后台直播录制线程。
+
+    会话对象暴露为 self.session：界面线程可通过 stop_recording() /
+    save_snapshot() 控制录制，QTimer 读取进度信息。
+    """
+
+    log = Signal(str)
+    finished_rec = Signal(object)   # {returncode, files, chat}
+    failed = Signal(str)
+
+    def __init__(self, params):
+        super().__init__()
+        self.params = params
+        self.session = None
+
+    def run(self) -> None:
+        from ..core.recorder import RecordSession
+
+        session = RecordSession(self.params)
+        self.session = session
+        try:
+            session.start(on_output=self.log.emit)
+            returncode = session.wait()
+        except Exception as e:
+            self.failed.emit(f"录制启动失败: {e}")
+            return
+
+        files = session.current_files()
+        chat = next(
+            (f for f in files if f.name.endswith(".live_chat.json")), None
+        )
+        self.finished_rec.emit({
+            "returncode": returncode,
+            "files": files,
+            "chat": chat,
+        })
+
+    def stop_recording(self, timeout: float = 30.0) -> None:
+        """优雅停止录制（OS 级信号，可从界面线程调用）。"""
+        if self.session is not None:
+            self.session.stop(timeout=timeout)
+
+    def save_snapshot(self, target_dir=None) -> list:
+        """保存当前已录制片段（不中断录制）。"""
+        if self.session is None:
+            return []
+        return self.session.save_snapshot(target_dir)
+
+
+class MonitorWorker(QThread):
+    """后台频道开播监控线程：检测到开播时发 live_found 信号。"""
+
+    log = Signal(str)
+    live_found = Signal(str, str)   # (视频 URL, 标题)
+    monitor_finished = Signal()
+    failed = Signal(str)
+
+    def __init__(self, channel_url: str, interval: float, proxy: str = "",
+                 pot_token_script: str = ""):
+        super().__init__()
+        self.channel_url = channel_url
+        self.interval = interval
+        self.proxy = proxy
+        self.pot_token_script = pot_token_script
+        self._stop_flag = False
+
+    def stop_monitor(self) -> None:
+        self._stop_flag = True
+
+    def run(self) -> None:
+        from ..core.monitor import probe_channel_live
+
+        self.log.emit(
+            f"开始监控: {self.channel_url}（每 {self.interval:g} 秒探测一次）"
+        )
+        first = True
+        while not self._stop_flag:
+            try:
+                url, title = probe_channel_live(
+                    self.channel_url,
+                    proxy=self.proxy,
+                    pot_token_script=self.pot_token_script,
+                )
+            except Exception as e:
+                self.log.emit(f"探测失败: {e}")
+                url, title = None, ""
+            if url is not None:
+                self.log.emit(f"检测到开播: {title}")
+                self.live_found.emit(url, title)
+                break
+            if first:
+                self.log.emit("暂未开播，持续监控中…")
+                first = False
+            deadline = time.monotonic() + self.interval
+            while not self._stop_flag and time.monotonic() < deadline:
+                time.sleep(0.5)
+        self.monitor_finished.emit()

@@ -567,12 +567,13 @@ def test_main_window_sidebar_navigation(qapp):
     apply_theme(qapp)
     window = DanmakuStudioWindow()
 
-    assert window.nav_list.count() == 4
+    assert window.nav_list.count() == 5
     assert window.nav_list.item(0).text() == "压制设置"
     assert window.nav_list.item(1).text() == "弹幕样式"
     assert window.nav_list.item(2).text() == "JSON 转 XML"
     assert window.nav_list.item(3).text() == "下载内容"
-    assert window.pages.count() == 4
+    assert window.nav_list.item(4).text() == "直播录制"
+    assert window.pages.count() == 5
     assert window.pages.currentIndex() == 0
 
     window.nav_list.setCurrentRow(2)

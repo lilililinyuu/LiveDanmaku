@@ -46,3 +46,11 @@ system:
   stderr_thread_timeout: 5
   video_alignment: 2
   max_queue_frames: 64
+recorder:
+  proxy: socks5://127.0.0.1:7897
+  pot_token_script: D:/youtube-video-download/bgutil-pot.exe
+  fmt: bestvideo+bestaudio/best
+  output_template: '%(upload_date)s_%(title)s.%(ext)s'
+  live_from_start: true
+  record_chat: true
+  monitor_interval: 60.0
