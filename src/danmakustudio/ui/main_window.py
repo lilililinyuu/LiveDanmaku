@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSpinBox,
     QSplitter,
@@ -40,6 +41,11 @@ from ..config.loader import config_to_yaml, load_config
 from ..config.models import DanmakuConfig, EncodeMode, apply_style_overrides
 from ..errors import DanmakuStudioError
 from ..input.parser import parse_subtitle
+from ..input.trim import (
+    default_trimmed_path,
+    trim_chat_json_file,
+    trim_subtitle_xml_file,
+)
 from ..utils.validation import SUPPORTED_VIDEO_EXTS
 from ._shared import (
     config_dialog_start_location,
@@ -55,6 +61,15 @@ from .worker import BatchWorker, DownloadWorker
 
 # 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
 _TRIM_REF_WINDOW = 40
+
+
+def parse_danmaku_preview_events(path: Path) -> list:
+    """按扩展名解析弹幕文件的前 40 条事件（JSON 走聊天解析）。"""
+    if path.suffix.lower() == ".json":
+        from ..input.chat2xml import preview_json_events
+
+        return preview_json_events(str(path))
+    return parse_subtitle(str(path))
 
 
 class TrimReferenceDialog(QDialog):
@@ -115,6 +130,84 @@ class TrimReferenceDialog(QDialog):
     def keep_index(self) -> int:
         """用户选择保留的弹幕序号（1-based）。"""
         return max(0, self.table.currentRow()) + 1
+
+
+class TrimExportDialog(QDialog):
+    """删除开头 N 条弹幕并导出文件：可选覆盖原文件或生成新文件。"""
+
+    def __init__(self, src: Path, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.src = src
+        self.setWindowTitle("删除开头弹幕 · 导出文件")
+        self.setMinimumWidth(600)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        src_label = QLabel(f"源文件：{src}")
+        src_label.setWordWrap(True)
+        layout.addWidget(src_label)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        count_row = QHBoxLayout()
+        count_row.setSpacing(8)
+        self.count_spin = QSpinBox()
+        self.count_spin.setRange(0, 100000)
+        self.count_spin.setValue(0)
+        self.count_spin.setSuffix(" 条")
+        self.count_spin.setToolTip("删除文件开头 N 条弹幕；0 = 不删除，仅按所选方式导出")
+        count_row.addWidget(self.count_spin)
+        self.btn_reference = QPushButton("参照选择…")
+        self.btn_reference.setToolTip("列出该文件的前 40 条弹幕，选择保留哪一条")
+        self.btn_reference.clicked.connect(self._choose_reference)
+        count_row.addWidget(self.btn_reference)
+        count_row.addStretch(1)
+        form.addRow("删除开头", count_row)
+
+        self.radio_new = QRadioButton("生成新文件")
+        self.radio_new.setChecked(True)
+        self.radio_overwrite = QRadioButton("覆盖原文件")
+        self.radio_overwrite.setToolTip("直接改写源文件（不可恢复，请谨慎选择）")
+        form.addRow("导出方式", self.radio_new)
+        form.addRow("", self.radio_overwrite)
+        layout.addLayout(form)
+
+        self.target_label = QLabel("")
+        self.target_label.setObjectName("fieldHint")
+        self.target_label.setWordWrap(True)
+        layout.addWidget(self.target_label)
+        self.count_spin.valueChanged.connect(self._update_target)
+        self.radio_new.toggled.connect(self._update_target)
+        self._update_target()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("导出")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _choose_reference(self) -> None:
+        events = parse_danmaku_preview_events(self.src)
+        if not events:
+            QMessageBox.warning(self, "提示", "该文件没有可展示的弹幕事件。")
+            return
+        dialog = TrimReferenceDialog(events, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.count_spin.setValue(max(0, dialog.keep_index - 1))
+
+    def _update_target(self, *_args) -> None:
+        if self.radio_new.isChecked():
+            target = default_trimmed_path(self.src, self.count_spin.value())
+            self.target_label.setText(f"输出文件：{target}")
+        else:
+            self.target_label.setText("输出文件：覆盖原文件")
+
+    def values(self) -> tuple[int, bool]:
+        """返回 (删除条数, 是否覆盖原文件)。"""
+        return self.count_spin.value(), self.radio_overwrite.isChecked()
 
 
 class DanmakuStudioWindow(QWidget):
@@ -533,7 +626,7 @@ class DanmakuStudioWindow(QWidget):
             self.btn_toggle_sidebar.setText("«")
             self.btn_toggle_sidebar.setToolTip("收起侧边栏")
 
-    def _build_json_page(self) -> QFrame:
+    def _build_json_page(self) -> QWidget:
         """「JSON 转 XML」功能页。"""
         card = QFrame()
         card.setObjectName("card")
@@ -557,7 +650,7 @@ class DanmakuStudioWindow(QWidget):
         path_row = QHBoxLayout()
         path_row.setSpacing(8)
         self.json_path_edit = QLineEdit()
-        self.json_path_edit.setPlaceholderText("选择 yt-dlp 导出的聊天 JSON 文件")
+        self.json_path_edit.setPlaceholderText("选择聊天 JSON 或弹幕 XML 文件")
         self.btn_json_browse = QPushButton("浏览…")
         self.btn_json_browse.clicked.connect(self.browse_chat_json)
         path_row.addWidget(self.json_path_edit, 1)
@@ -567,6 +660,12 @@ class DanmakuStudioWindow(QWidget):
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
+        self.btn_trim = QPushButton("删除开头弹幕…")
+        self.btn_trim.setToolTip(
+            "删除文件开头 N 条弹幕并导出（JSON/XML；可选覆盖原文件或生成新文件）"
+        )
+        self.btn_trim.clicked.connect(self.trim_danmaku_file)
+        action_row.addWidget(self.btn_trim)
         self.btn_json_convert = QPushButton("转换为 XML")
         self.btn_json_convert.clicked.connect(self.start_json_convert)
         action_row.addWidget(self.btn_json_convert)
@@ -588,7 +687,7 @@ class DanmakuStudioWindow(QWidget):
         layout.addLayout(action_row)
         return self._hug_content_page(card)
 
-    def _hug_content_page(self, card: QFrame) -> QWidget:
+    def _hug_content_page(self, card: QWidget) -> QWidget:
         """功能页容器：卡片贴内容高度，避免大片空白卡片。"""
         page = QWidget()
         page_layout = QVBoxLayout(page)
@@ -597,7 +696,7 @@ class DanmakuStudioWindow(QWidget):
         page_layout.addStretch(1)
         return page
 
-    def _build_download_page(self) -> QFrame:
+    def _build_download_page(self) -> QWidget:
         """「下载内容」功能页：yt-dlp 下载视频 / 弹幕 / 封面。"""
         card = QFrame()
         card.setObjectName("card")
@@ -668,12 +767,7 @@ class DanmakuStudioWindow(QWidget):
         if xml_path is None:
             return
         try:
-            if xml_path.suffix.lower() == ".json":
-                from ..input.chat2xml import preview_json_events
-
-                events = preview_json_events(str(xml_path))
-            else:
-                events = parse_subtitle(str(xml_path))
+            events = parse_danmaku_preview_events(xml_path)
         except (OSError, ValueError) as e:
             QMessageBox.warning(self, "提示", f"弹幕文件读取失败: {e}")
             return
@@ -786,7 +880,8 @@ class DanmakuStudioWindow(QWidget):
             self.btn_drop_reference, self.drop_first_spin,
             self.test_clip_check, self.clip_duration_spin,
             self.clip_start_check, self.clip_start_spin,
-            self.btn_json_convert, self.btn_highlights, self.btn_download_start,
+            self.btn_json_convert, self.btn_highlights, self.btn_trim,
+            self.btn_download_start,
         ):
             widget.setEnabled(not locked)
         if not locked:
@@ -1004,6 +1099,47 @@ class DanmakuStudioWindow(QWidget):
         self.summary_label.setText(
             f"高潮点分析完成: {len(intervals)} 段（详见日志）"
         )
+
+    def trim_danmaku_file(self) -> None:
+        """删除开头弹幕并直接导出文件（JSON 进出 JSON，XML 进出 XML）。"""
+        if self._busy():
+            QMessageBox.warning(self, "提示", "已有任务正在处理，请稍候。")
+            return
+        path_text = self.json_path_edit.text().strip()
+        if not path_text:
+            QMessageBox.warning(self, "提示", "请先在上方选择弹幕文件。")
+            return
+        src = Path(path_text)
+        if not src.is_file():
+            QMessageBox.warning(self, "提示", f"文件不存在: {src}")
+            return
+        if src.suffix.lower() not in (".json", ".xml"):
+            QMessageBox.warning(self, "提示", "仅支持 JSON 或 XML 弹幕文件。")
+            return
+
+        dialog = TrimExportDialog(src, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        count, overwrite = dialog.values()
+        target = src if overwrite else default_trimmed_path(src, count)
+
+        self.setCursor(Qt.CursorShape.WaitCursor)
+        try:
+            if src.suffix.lower() == ".json":
+                removed, kept = trim_chat_json_file(src, target, count)
+            else:
+                removed, kept = trim_subtitle_xml_file(src, target, count)
+        except (ValueError, OSError) as e:
+            QMessageBox.warning(self, "提示", f"删除开头弹幕失败: {e}")
+            return
+        finally:
+            self.unsetCursor()
+
+        self.log.clear()
+        self.append_log(f"删除开头弹幕: {src.name}")
+        self.append_log(f"  已删除开头 {removed} 条，剩余 {kept} 条")
+        self.append_log(f"  输出文件: {target}")
+        self.summary_label.setText(f"删除开头弹幕完成 → {target.name}")
 
     def _convert_chat_json_and_adopt(self, json_path: Path) -> None:
         """转换聊天 JSON 为 XML；检测到同名视频时询问加入任务队列。"""
