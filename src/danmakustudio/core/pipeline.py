@@ -106,11 +106,13 @@ def download_items(
         text=True,
         creationflags=_CREATE_NO_WINDOW,
     )
-    assert process.stdout is not None and process.stderr is not None
+    stdout_pipe = process.stdout
+    stderr_pipe = process.stderr
+    assert stdout_pipe is not None and stderr_pipe is not None
     stderr_tail: deque[str] = deque(maxlen=30)
 
     def _drain_stderr() -> None:
-        for raw in process.stderr:
+        for raw in stderr_pipe:
             line_str = raw.strip()
             if line_str:
                 stderr_tail.append(line_str)
@@ -119,7 +121,7 @@ def download_items(
     stderr_thread.start()
 
     lines: list[str] = []
-    for raw in process.stdout:
+    for raw in stdout_pipe:
         line_str = raw.strip()
         if not line_str:
             continue
@@ -129,9 +131,6 @@ def download_items(
 
     return_code = process.wait()
     stderr_thread.join(timeout=5)
-    if return_code != 0:
-        tail = "\n".join(list(stderr_tail)[-10:])
-        raise DanmakuStudioError(f"yt-dlp 下载失败: {tail or f'退出码 {return_code}'}")
 
     video, chat = parse_ytdlp_paths(lines)
 
@@ -141,6 +140,10 @@ def download_items(
         chat = _find_new_file(out_dir, before, ".live_chat.json", ".json")
         if chat is not None:
             logger.info("从下载目录找到弹幕 JSON: {}", chat.name)
+    if want_video and video is None:
+        video = _find_new_file(out_dir, before, *_VIDEO_EXTS)
+        if video is not None:
+            logger.info("从下载目录找到视频: {}", video.name)
 
     thumbnail: Path | None = None
     if want_thumbnail:
@@ -150,12 +153,40 @@ def download_items(
             raise DanmakuStudioError("未找到下载的封面图片，请检查 yt-dlp 输出。")
         thumbnail = _largest_thumbnail_to_png(thumbs)
 
-    if want_video and video is None:
-        raise DanmakuStudioError("yt-dlp 输出中未找到视频文件，请检查下载结果。")
-    if want_chat and chat is None:
-        raise DanmakuStudioError("yt-dlp 输出中未找到弹幕 JSON，请检查下载结果。")
+    # yt-dlp 异常退出时，只要有一部分请求的内容已成功获取，就按部分
+    # 成功处理（例如视频中途失败但弹幕 JSON 已完整保存）
+    if return_code != 0:
+        tail = "\n".join(list(stderr_tail)[-10:])
+        got_any = (
+            (want_video and video is not None)
+            or (want_chat and chat is not None)
+            or (want_thumbnail and thumbnail is not None)
+        )
+        if not got_any:
+            raise DanmakuStudioError(
+                f"yt-dlp 下载失败: {tail or f'退出码 {return_code}'}"
+            )
+        logger.warning("yt-dlp 异常退出（退出码 {}），已获取部分内容", return_code)
+        if on_output is not None:
+            on_output(f"[警告] yt-dlp 异常退出（退出码 {return_code}），已获取部分内容")
+
+    # 正常退出时所有请求项必须齐全；异常退出但拿到部分内容时按部分
+    # 成功返回（缺失项为 None，由调用方按实际结果处理）
+    if return_code == 0:
+        if want_video and video is None:
+            raise DanmakuStudioError("yt-dlp 输出中未找到视频文件，请检查下载结果。")
+        if want_chat and chat is None:
+            raise DanmakuStudioError("yt-dlp 输出中未找到弹幕 JSON，请检查下载结果。")
 
     return {"video": video, "chat": chat, "thumbnail": thumbnail}
+
+
+def _safe_mtime(path: Path) -> float:
+    """取文件 mtime；文件在扫描间隙被删除时返回 0（排序垫底）。"""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _find_new_file(
@@ -175,7 +206,7 @@ def _find_new_file(
         return None
     new_files = sorted(
         after - before,
-        key=lambda p: p.stat().st_mtime,
+        key=lambda p: _safe_mtime(p),
         reverse=True,
     )
     for suffix in preferred_suffixes:

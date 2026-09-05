@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from loguru import logger
@@ -31,8 +32,11 @@ def default_trimmed_path(src: Path, drop_first: int) -> Path:
 def trim_chat_json_file(src: Path, dst: Path, drop_first: int) -> tuple[int, int]:
     """删除聊天 JSONL 开头 drop_first 条消息，结果写入 dst。
 
-    返回 (删除条数, 保留条数)。保留行按原始文本写出，非消息对象
+    返回 (删除条数, 保留行数)。保留行按原始文本写出，非消息对象
     原样保留。drop_first 超过消息总数时抛 ValueError（不写任何文件）。
+
+    dst 允许与 src 相同（覆盖原文件）：先写临时文件再原子替换，
+    避免边读边写把源文件清空。
     """
     if drop_first < 0:
         raise ValueError(f"删除条数不能为负数，当前 {drop_first}")
@@ -45,29 +49,36 @@ def trim_chat_json_file(src: Path, dst: Path, drop_first: int) -> tuple[int, int
 
     removed = 0
     kept = 0
-    with open(src, "r", encoding="utf-8") as fin, open(
-        dst, "w", encoding="utf-8"
-    ) as fout:
-        for line in fin:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                obj = json.loads(stripped)
-            except json.JSONDecodeError:
-                keep = True
-            else:
-                is_message = isinstance(obj, dict) and bool(
-                    obj.get("replayChatItemAction")
-                )
-                if is_message and removed < drop_first:
-                    removed += 1
-                    keep = False
-                else:
+    tmp = dst.with_name(dst.name + ".tmp")
+    try:
+        with open(src, "r", encoding="utf-8") as fin, open(
+            tmp, "w", encoding="utf-8"
+        ) as fout:
+            for line in fin:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    obj = json.loads(stripped)
+                except json.JSONDecodeError:
                     keep = True
-            if keep:
-                fout.write(line if line.endswith("\n") else line + "\n")
-                kept += 1
+                else:
+                    is_message = isinstance(obj, dict) and bool(
+                        obj.get("replayChatItemAction")
+                    )
+                    if is_message and removed < drop_first:
+                        removed += 1
+                        keep = False
+                    else:
+                        keep = True
+                if keep:
+                    fout.write(line if line.endswith("\n") else line + "\n")
+                    kept += 1
+        os.replace(tmp, dst)
+    except BaseException:
+        # 失败时清理残留的临时文件（成功时临时文件已被替换移走）
+        tmp.unlink(missing_ok=True)
+        raise
     logger.info("聊天 JSON 开头删除: 删除 {} 条，保留 {} 行 -> {}", removed, kept, dst)
     return removed, kept
 

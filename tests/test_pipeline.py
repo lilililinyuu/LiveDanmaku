@@ -187,3 +187,40 @@ def test_download_items_chat_fallback_prefers_plain_json(monkeypatch, tmp_path):
 
     assert result["chat"] is not None
     assert result["chat"].name == "x.json"
+
+
+def test_download_items_partial_success(monkeypatch, tmp_path):
+    """yt-dlp 异常退出但弹幕 JSON 已保存时应按部分成功返回，不报错。"""
+
+    def fake_popen(cmd, **kwargs):
+        chat = tmp_path / "【直播】x.live_chat.json"
+        chat.write_text("{}", encoding="utf-8")
+        return _FakePopen([], returncode=1)   # 视频中途失败
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    result = download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=True, want_chat=True, want_thumbnail=False,
+    )
+
+    assert result["video"] is None
+    assert result["chat"] is not None
+    assert result["chat"].name.endswith(".live_chat.json")
+
+
+def test_download_items_total_failure_raises(monkeypatch, tmp_path):
+    """什么都没下载到时仍应报下载失败。"""
+
+    def fake_popen(cmd, **kwargs):
+        return _FakePopen([], returncode=1)
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    with pytest.raises(DanmakuStudioError, match="yt-dlp 下载失败"):
+        download_items(
+            "http://example.com", tmp_path, "b",
+            want_video=True, want_chat=True, want_thumbnail=False,
+        )

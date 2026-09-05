@@ -118,3 +118,20 @@ def test_trim_invalid_count(tmp_path):
     xml.write_text("<i><d p=\"1\">a</d></i>", encoding="utf-8")
     with pytest.raises(ValueError, match="不少于"):
         trim_subtitle_xml_file(xml, tmp_path / "o.xml", 1)
+
+
+def test_trim_chat_json_file_overwrite(tmp_path):
+    """回归：覆盖原文件模式应写回删除后的完整内容（不得清空文件）。"""
+    src = _write_chat(tmp_path, ["测试1", "测试2", "测试3", "正式"])
+
+    removed, kept = trim_chat_json_file(src, src, 2)
+
+    assert (removed, kept) == (2, 2)
+    lines = [json.loads(l) for l in src.read_text(encoding="utf-8").splitlines()]
+    texts = [
+        l["replayChatItemAction"]["actions"][0]["addChatItemAction"]["item"]
+        ["liveChatTextMessageRenderer"]["message"]["runs"][0]["text"]
+        for l in lines
+    ]
+    assert texts == ["测试3", "正式"]
+    assert not list(tmp_path.glob("*.tmp"))
