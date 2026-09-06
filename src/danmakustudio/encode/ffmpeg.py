@@ -231,18 +231,26 @@ class FFmpegManager:
         layer_params: LayerParams,
         in_ss: float = 0.0,
         in_t: float | None = None,
+        render_scale: float = 1.0,
     ) -> list[str]:
         """构建 FFmpeg 命令。
 
         Args:
             in_ss: 输入视频起始时间（秒），用于测试片段压制
             in_t: 输入视频编码时长（秒），None=到结尾
+            render_scale: 弹幕层超采样倍率（画布随之放大，合成前缩回）
         """
         if self.active_pipeline == EncodeMode.GPU:
-            return self._build_gpu_command(fps, w, h, layer_params, in_ss, in_t)
+            return self._build_gpu_command(
+                fps, w, h, layer_params, in_ss, in_t, render_scale
+            )
         if self.active_pipeline == EncodeMode.QSV:
-            return self._build_qsv_command(fps, w, h, layer_params, in_ss, in_t)
-        return self._build_cpu_command(fps, w, h, layer_params, in_ss, in_t)
+            return self._build_qsv_command(
+                fps, w, h, layer_params, in_ss, in_t, render_scale
+            )
+        return self._build_cpu_command(
+            fps, w, h, layer_params, in_ss, in_t, render_scale
+        )
 
     def _extra_args(self) -> list[str]:
         """用户自定义的 ffmpeg 参数（追加在输出文件之前）。"""
@@ -251,7 +259,15 @@ class FFmpegManager:
     def _build_gpu_command(
         self, fps: float, w: int, h: int, lp: LayerParams,
         in_ss: float = 0.0, in_t: float | None = None,
+        render_scale: float = 1.0,
     ) -> list[str]:
+        fg = (
+            f"[1:v]scale={w}:{h}:flags=lanczos,format=yuva420p[fg]"
+            if render_scale > 1.0
+            else "[1:v]format=yuva420p[fg]"
+        )
+        canvas_w = round(lp.layer_w * render_scale)
+        canvas_h = round(lp.layer_h * render_scale)
         cmd = ["ffmpeg", "-y"]
         if in_ss > 0:
             cmd += ["-ss", str(in_ss)]
@@ -259,14 +275,14 @@ class FFmpegManager:
         return cmd + [
             "-f", "rawvideo",
             "-pix_fmt", "bgra",
-            "-s", f"{lp.layer_w}x{lp.layer_h}",
+            "-s", f"{canvas_w}x{canvas_h}",
             "-r", str(fps),
             "-i", "pipe:0",
         ] + (["-t", str(in_t)] if in_t is not None else []) + [
             "-filter_complex",
             (
                 f"[0:v]scale={w}:{h}:flags=lanczos,format=yuv420p[bg];"
-                f"[1:v]format=yuva420p[fg];"
+                f"{fg};"
                 f"[bg][fg]overlay=x={lp.layer_x}:y={lp.layer_y},format=yuv420p[out]"
             ),
             "-map", "[out]",
@@ -286,7 +302,15 @@ class FFmpegManager:
     def _build_qsv_command(
         self, fps: float, w: int, h: int, lp: LayerParams,
         in_ss: float = 0.0, in_t: float | None = None,
+        render_scale: float = 1.0,
     ) -> list[str]:
+        fg = (
+            f"[1:v]scale={w}:{h}:flags=lanczos,format=yuva420p[fg]"
+            if render_scale > 1.0
+            else "[1:v]format=yuva420p[fg]"
+        )
+        canvas_w = round(lp.layer_w * render_scale)
+        canvas_h = round(lp.layer_h * render_scale)
         cmd = ["ffmpeg", "-y"]
         if in_ss > 0:
             cmd += ["-ss", str(in_ss)]
@@ -294,14 +318,14 @@ class FFmpegManager:
         return cmd + [
             "-f", "rawvideo",
             "-pix_fmt", "bgra",
-            "-s", f"{lp.layer_w}x{lp.layer_h}",
+            "-s", f"{canvas_w}x{canvas_h}",
             "-r", str(fps),
             "-i", "pipe:0",
         ] + (["-t", str(in_t)] if in_t is not None else []) + [
             "-filter_complex",
             (
                 f"[0:v]scale={w}:{h}:flags=lanczos,format=yuv420p[bg];"
-                f"[1:v]format=yuva420p[fg];"
+                f"{fg};"
                 f"[bg][fg]overlay=x={lp.layer_x}:y={lp.layer_y},format=nv12[out]"
             ),
             "-map", "[out]",
@@ -319,10 +343,18 @@ class FFmpegManager:
     def _build_cpu_command(
         self, fps: float, w: int, h: int, lp: LayerParams,
         in_ss: float = 0.0, in_t: float | None = None,
+        render_scale: float = 1.0,
     ) -> list[str]:
         cpu_count = os.cpu_count() or 4
         encode_threads = max(1, cpu_count - self.encode_params.cpu_min_reserve_threads)
 
+        fg = (
+            f"[1:v]scale={w}:{h}:flags=lanczos,format=yuva420p[fg]"
+            if render_scale > 1.0
+            else "[1:v]format=yuva420p[fg]"
+        )
+        canvas_w = round(lp.layer_w * render_scale)
+        canvas_h = round(lp.layer_h * render_scale)
         cmd = ["ffmpeg", "-y"]
         if in_ss > 0:
             cmd += ["-ss", str(in_ss)]
@@ -330,14 +362,14 @@ class FFmpegManager:
         return cmd + [
             "-f", "rawvideo",
             "-pix_fmt", "bgra",
-            "-s", f"{lp.layer_w}x{lp.layer_h}",
+            "-s", f"{canvas_w}x{canvas_h}",
             "-r", str(fps),
             "-i", "pipe:0",
         ] + (["-t", str(in_t)] if in_t is not None else []) + [
             "-filter_complex",
             (
                 f"[0:v]scale={w}:{h}:flags=lanczos[bg];"
-                f"[1:v]format=yuva420p[fg];"
+                f"{fg};"
                 f"[bg][fg]overlay=x={lp.layer_x}:y={lp.layer_y},format=yuv420p[out]"
             ),
             "-map", "[out]",

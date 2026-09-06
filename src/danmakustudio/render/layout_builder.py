@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -45,10 +45,17 @@ class DanmakuLayout:
         self.text_style = text_style
         self.emoji_style = emoji_style
 
-    def pre_render(self, font, emoji_cache):
-        self.cached_image = QImage(self.total_width, self.height, QImage.Format.Format_ARGB32)
+    def pre_render(self, font, emoji_cache, scale: float = 1.0):
+        """按 scale 超采样预渲染（默认 1.0 = 与视频同分辨率）。"""
+        s = max(1.0, float(scale))
+        self.cached_image = QImage(
+            max(1, round(self.total_width * s)),
+            max(1, round(self.height * s)),
+            QImage.Format.Format_ARGB32,
+        )
         self.cached_image.fill(Qt.GlobalColor.transparent)
         painter = QPainter(self.cached_image)
+        painter.scale(s, s)
         painter.setFont(font)
 
         ts = self.text_style
@@ -91,17 +98,25 @@ class DanmakuLayout:
                         painter.drawText(curr_x, text_baseline_y, seg.content)
                 elif seg.type == 'emoji' and seg.has_cache:
                     scaled_img = emoji_cache[seg.content]
-                    emoji_y = curr_row_top + (self.line_height - scaled_img.height()) // 2
+                    # 表情按逻辑行高框定目标矩形，源图为倍率分辨率（1:1 像素映射更清晰）
+                    logical_h = scaled_img.height() / s if s else self.line_height
+                    emoji_y = curr_row_top + (self.line_height - logical_h) / 2
                     painter.save()
                     painter.setOpacity(self.emoji_style.opacity)
-                    painter.drawImage(curr_x, emoji_y, scaled_img)
+                    painter.drawImage(
+                        QRectF(curr_x, emoji_y, logical_h, logical_h),
+                        scaled_img,
+                    )
                     painter.restore()
                 curr_x += seg.width
         painter.end()
 
     def render(self, painter, x, y):
         if self.cached_image:
-            painter.drawImage(x, y, self.cached_image)
+            # 目标矩形 = 逻辑尺寸：超采样缓存按原比例缩放合成，清晰度不损失
+            painter.drawImage(
+                QRectF(x, y, self.total_width, self.height), self.cached_image
+            )
 
 
 class DanmakuLayoutBuilder:

@@ -162,23 +162,8 @@ class RecordSession:
         ).start()
         return proc
 
-    def wait(self, timeout: float | None = None) -> int | None:
-        """等待全部录制进程结束，返回视频进程的退出码。"""
-        if not self.processes:
-            raise RuntimeError("录制尚未启动")
-        returncode: int | None = None
-        for index, proc in enumerate(self.processes):
-            rc = proc.wait(timeout=timeout)
-            if index == 0:
-                returncode = rc
-        return returncode
-
-    def stop(self, timeout: float = 30.0) -> None:
-        """优雅停止录制：先 CTRL_BREAK 让 yt-dlp 收尾，超时强制终止。
-
-        可从任意线程调用（发送的是 OS 级信号，不触碰 Qt）。
-        """
-        deadline = time.time() + timeout
+    def request_stop(self) -> None:
+        """向全部录制进程发送 CTRL_BREAK（非阻塞，立即返回）。"""
         for proc in self.processes:
             if proc.poll() is not None:
                 continue
@@ -186,18 +171,44 @@ class RecordSession:
                 proc.send_signal(_CTRL_BREAK)
             except (OSError, ValueError):
                 proc.terminate()
+
+    def terminate_all(self) -> None:
+        """强制终止全部录制进程。"""
         for proc in self.processes:
-            if proc.poll() is not None:
-                continue
-            try:
-                proc.wait(timeout=max(1.0, deadline - time.time()))
-            except subprocess.TimeoutExpired:
-                logger.warning("录制进程未在 {} 秒内收尾，强制终止", timeout)
+            if proc.poll() is None:
+                logger.warning("录制进程未在限时内收尾，强制终止")
                 proc.terminate()
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+
+    def wait(self, stop_flag: Callable[[], bool] | None = None) -> int | None:
+        """等待全部录制进程结束，返回视频进程的退出码。
+
+        stop_flag 返回 True 时请求停止：先发 CTRL_BREAK 优雅收尾，
+        超过 30 秒仍未退出则强制终止。轮询不会阻塞界面线程。
+        """
+        if not self.processes:
+            raise RuntimeError("录制尚未启动")
+        stop_sent = False
+        stop_sent_at = 0.0
+        while True:
+            alive = [p for p in self.processes if p.poll() is None]
+            if not alive:
+                break
+            if stop_flag is not None and stop_flag():
+                if not stop_sent:
+                    self.request_stop()
+                    stop_sent = True
+                    stop_sent_at = time.time()
+                    logger.info("已发送停止信号，等待 yt-dlp 收尾…")
+                elif time.time() - stop_sent_at > 30.0:
+                    self.terminate_all()
+                    stop_sent_at = time.time()
+            time.sleep(0.2)
+        returncode: int | None = None
+        for index, proc in enumerate(self.processes):
+            rc = proc.wait()
+            if index == 0:
+                returncode = rc
+        return returncode
 
     def current_files(self) -> list[Path]:
         """录制开始后新产生的输出文件（按修改时间从新到旧）。

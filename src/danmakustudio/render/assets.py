@@ -87,11 +87,13 @@ class AssetLoader:
         font_size: int = DEFAULT_CONFIG.style.font_size,
         font_family: str = DEFAULT_CONFIG.style.font_family,
         emoji_style=DEFAULT_CONFIG.style.emoji,
+        render_scale: float = 1.0,
     ):
         self.emoji_cache: dict[str, QImage] = {}
         self._font_size = font_size
         self._font_family = font_family
         self._emoji_style = emoji_style
+        self.render_scale = render_scale   # 超采样倍率：表情按倍率加载保持清晰
 
         if QGuiApplication.instance() is None:
             raise RuntimeError("必须先创建 QApplication")
@@ -142,7 +144,9 @@ class AssetLoader:
                     used_emoji.add(name)
 
         self._load_fonts_for_chars(all_chars)
-        emoji_target_height = max(1, int(self.line_height * self._emoji_style.size_ratio))
+        emoji_target_height = max(
+            1, int(self.line_height * self._emoji_style.size_ratio * self.render_scale)
+        )
         self._load_image_assets(
             self.emoji_dir, used_emoji, self.emoji_cache, "Emoji",
             target_height=emoji_target_height,

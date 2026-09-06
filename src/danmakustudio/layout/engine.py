@@ -79,7 +79,11 @@ class LayoutEngine:
             emitted_text_rows += dm_rows
 
             if dm.cached_image is None:
-                dm.pre_render(asset_provider.font, asset_provider.emoji_cache)
+                dm.pre_render(
+                asset_provider.font,
+                asset_provider.emoji_cache,
+                scale=getattr(asset_provider, "render_scale", 1.0),
+            )
             if max_text_rows is None:
                 max_text_rows = 10
             row = LayoutEngine.pick_lane(

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -437,6 +438,25 @@ class DanmakuStudioWindow(QWidget):
         drop_row.addWidget(self.btn_drop_reference)
         drop_row.addStretch(1)
         options.addLayout(drop_row, 5, 1)
+
+        scale_label = QLabel("渲染精度")
+        scale_label.setObjectName("fieldLabel")
+        options.addWidget(scale_label, 6, 0)
+        scale_row = QHBoxLayout()
+        scale_row.setSpacing(8)
+        self.render_scale_spin = QDoubleSpinBox()
+        self.render_scale_spin.setRange(1.0, 4.0)
+        self.render_scale_spin.setSingleStep(0.5)
+        self.render_scale_spin.setDecimals(1)
+        self.render_scale_spin.setValue(1.0)
+        self.render_scale_spin.setSuffix(" 倍")
+        self.render_scale_spin.setToolTip(
+            "弹幕文字渲染超采样倍率：先按倍率放大渲染再缩回视频尺寸，"
+            "越高文字边缘越细腻（内存/CPU 占用略增）；1 = 原始清晰度。"
+        )
+        scale_row.addWidget(self.render_scale_spin)
+        scale_row.addStretch(1)
+        options.addLayout(scale_row, 6, 1)
         settings_layout.addLayout(options)
 
         style_card = QFrame()
@@ -650,8 +670,9 @@ class DanmakuStudioWindow(QWidget):
         for label in ("压制设置", "弹幕样式", "JSON 转 XML", "下载内容", "直播录制"):
             self.nav_list.addItem(label)
         self.nav_list.setCurrentRow(0)
+        # 纵向填满侧边栏：功能项少时不留底部空白，也不会压缩出内部滚动
+        self.nav_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         side_layout.addWidget(self.nav_list)
-        side_layout.addStretch(1)
 
         self.sidebar = sidebar
         return sidebar
@@ -1221,7 +1242,7 @@ class DanmakuStudioWindow(QWidget):
             self.test_clip_check, self.clip_duration_spin,
             self.clip_start_check, self.clip_start_spin,
             self.btn_json_convert, self.btn_highlights, self.btn_trim,
-            self.btn_download_start,
+            self.btn_download_start, self.render_scale_spin, self.render_scale_spin,
         ):
             widget.setEnabled(not locked)
         if not locked:
@@ -1789,6 +1810,7 @@ class DanmakuStudioWindow(QWidget):
             test_clip=test_clip,
             clip_duration=self.clip_duration_spin.value(),
             drop_first=int(self.drop_first_spin.value()),
+            render_scale=self.render_scale_spin.value(),
             clip_start=(
                 self.clip_start_spin.value()
                 if test_clip and self.clip_start_check.isChecked()

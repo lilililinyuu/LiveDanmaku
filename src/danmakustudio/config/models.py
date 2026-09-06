@@ -99,11 +99,16 @@ class LayoutStyle:
         outline_width=0.7, shadow_color="#000000", shadow_opacity=0.7,
     ))  # 会员文本样式
     emoji: EmojiStyle = field(default_factory=EmojiStyle)       # 表情样式
+    render_scale: float = 1.0   # 弹幕渲染超采样倍率（>1 文字边缘更细腻）
 
     def __post_init__(self):
         _assert_non_negative(self, "row_vertical_gap", "multiline_row_gap",
                              "danmaku_x", "layer_width_extra")
         _assert_positive(self, "font_size")
+        if not (0.5 <= self.render_scale <= 4.0):
+            raise ValueError(
+                f"render_scale 必须在 [0.5, 4.0] 范围内，当前 {self.render_scale}"
+            )
 
 
 @dataclass(frozen=True)

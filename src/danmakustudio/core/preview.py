@@ -61,6 +61,7 @@ def _build_asset_loader(config):
         font_size=config.style.font_size,
         font_family=config.style.font_family,
         emoji_style=config.style.emoji,
+        render_scale=config.style.render_scale,
     )
 
 
@@ -94,6 +95,7 @@ def render_preview_frame(
         return False
     painter = QPainter(frame)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     for dm in active:
         dm.render(painter, int(dm.x), int(dm.current_y))
     painter.end()

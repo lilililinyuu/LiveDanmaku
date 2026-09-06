@@ -65,9 +65,11 @@ class BatchWorker(QThread):
         clip_duration: float = 60.0,
         drop_first: int = 0,
         clip_start: float | None = None,
+        render_scale: float | None = None,
     ):
         super().__init__()
         self.jobs = jobs
+        self.render_scale = render_scale
         self.encode_mode = encode_mode
         self.config_path = config_path
         self.force = force
@@ -98,6 +100,12 @@ class BatchWorker(QThread):
             if self.style_overrides is not None:
                 config = apply_style_overrides(config, self.style_overrides)
                 self.log.emit("样式: 使用界面自定义样式覆盖")
+            if self.render_scale is not None:
+                config = replace(
+                    config,
+                    style=replace(config.style, render_scale=self.render_scale),
+                )
+                self.log.emit(f"弹幕渲染精度: {self.render_scale:g} 倍")
             if self.first_danmaku_at is not None:
                 config = replace(
                     config,
@@ -267,6 +275,7 @@ class RecordWorker(QThread):
         super().__init__()
         self.params = params
         self.session = None
+        self._stop_requested = False
 
     def run(self) -> None:
         from ..core.recorder import RecordSession, backfill_chat_replay
@@ -274,47 +283,54 @@ class RecordWorker(QThread):
         session = RecordSession(self.params)
         self.session = session
         try:
-            session.start(on_output=self.log.emit)
-            returncode = session.wait()
+            try:
+                session.start(on_output=self.log.emit)
+                returncode = session.wait(stop_flag=lambda: self._stop_requested)
+
+                # 整理中断产物：合并分离音视频、归位弹幕 JSON、清理期刊
+                final = session.finalize()
+                video = final.get("video")
+                chat = final.get("chat")
+            except Exception as e:
+                self.failed.emit(f"录制处理失败: {e}")
+                return
+
+            # 直播结束后 YouTube 才提供从头开始的弹幕回放；自动补全完整弹幕
+            if self.params.record_chat and chat is not None:
+                self.log.emit("正在获取从头开始的完整弹幕回放…（直播结束后可用）")
+                try:
+                    full = backfill_chat_replay(
+                        self.params.url,
+                        self.params.output_dir,
+                        self.params.output_template,
+                        proxy=self.params.proxy,
+                        pot_token_script=self.params.pot_token_script,
+                        current_size=chat.stat().st_size if chat.exists() else 0,
+                        on_output=self.log.emit,
+                    )
+                except Exception as e:
+                    self.log.emit(f"弹幕回放补全失败，保留实时弹幕: {e}")
+                    full = None
+                if full is not None:
+                    chat = full
+                    self.log.emit(f"已获取完整弹幕回放: {chat.name}")
+                else:
+                    self.log.emit("未获取到更完整的回放弹幕，保留录制时的实时弹幕。")
+
+            files = [p for p in (video, chat) if p is not None]
+            self.finished_rec.emit({
+                "returncode": returncode,
+                "files": files,
+                "chat": chat,
+                "video": video,
+            })
         except Exception as e:
-            self.failed.emit(f"录制启动失败: {e}")
-            return
+            # 任何未预期异常都必须通知界面，否则按钮/状态会永久卡住
+            self.failed.emit(f"录制处理失败: {e}")
 
-        # 整理中断产物：合并分离音视频、归位弹幕 JSON、清理期刊
-        final = session.finalize()
-        video = final.get("video")
-        chat = final.get("chat")
-
-        # 直播结束后 YouTube 才提供从头开始的弹幕回放；自动补全完整弹幕
-        if self.params.record_chat and chat is not None:
-            self.log.emit("正在获取从头开始的完整弹幕回放…（直播结束后可用）")
-            full = backfill_chat_replay(
-                self.params.url,
-                self.params.output_dir,
-                self.params.output_template,
-                proxy=self.params.proxy,
-                pot_token_script=self.params.pot_token_script,
-                current_size=chat.stat().st_size if chat.exists() else 0,
-                on_output=self.log.emit,
-            )
-            if full is not None:
-                chat = full
-                self.log.emit(f"已获取完整弹幕回放: {chat.name}")
-            else:
-                self.log.emit("未获取到更完整的回放弹幕，保留录制时的实时弹幕。")
-
-        files = [p for p in (video, chat) if p is not None]
-        self.finished_rec.emit({
-            "returncode": returncode,
-            "files": files,
-            "chat": chat,
-            "video": video,
-        })
-
-    def stop_recording(self, timeout: float = 30.0) -> None:
-        """优雅停止录制（OS 级信号，可从界面线程调用）。"""
-        if self.session is not None:
-            self.session.stop(timeout=timeout)
+    def stop_recording(self) -> None:
+        """请求停止录制（非阻塞：发送停止信号，收尾在录制线程完成）。"""
+        self._stop_requested = True
 
     def save_snapshot(self, target_dir=None) -> list:
         """保存当前已录制片段（不中断录制）。"""

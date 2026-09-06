@@ -52,6 +52,10 @@ class _FakePopen:
         self.signals.append("kill")
 
     def poll(self):
+        # 模拟进程行为：输出结束后自然退出
+        self._polls = getattr(self, "_polls", 0) + 1
+        if self.returncode is None and self._polls > 3:
+            self.returncode = 0
         return self.returncode
 
     def wait(self, timeout=None):
@@ -138,7 +142,7 @@ def test_record_session_streams_output_and_tracks_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     session.start(on_output=received.append)
-    session.wait()
+    session.wait(stop_flag=lambda: True)   # 立即请求停止以结束轮询
 
     assert any("已开始录制" in line for line in received)
     files = session.current_files()
@@ -154,7 +158,7 @@ def test_record_session_stop_sends_ctrl_break(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
     session.start()
-    session.stop()
+    session.wait(stop_flag=lambda: True)   # 立即请求停止
 
     assert all(p.signals[0] == _CTRL_BREAK for p in session.processes)
 

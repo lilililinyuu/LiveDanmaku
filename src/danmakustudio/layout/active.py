@@ -82,9 +82,10 @@ class ActiveDanmaku:
         self,
         font,
         emoji_cache: dict[str, QImage],
+        scale: float = 1.0,
     ) -> None:
         """预渲染弹幕到缓存图片，委托给 DanmakuLayout。"""
-        self.layout.pre_render(font, emoji_cache)
+        self.layout.pre_render(font, emoji_cache, scale=scale)
 
     def render(self, painter: QPainter, x: int, y: int) -> None:
         """使用缓存的预渲染图片绘制弹幕，委托给 DanmakuLayout。"""

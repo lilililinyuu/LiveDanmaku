@@ -67,7 +67,11 @@ def danmaku_state_at(
         dm = pool[idx]
         spawn_time = math.ceil(dm.event.time * fps) / fps
         if dm.cached_image is None:
-            dm.pre_render(asset_provider.font, asset_provider.emoji_cache)
+            dm.pre_render(
+                asset_provider.font,
+                asset_provider.emoji_cache,
+                scale=getattr(asset_provider, "render_scale", 1.0),
+            )
         row = LayoutEngine.pick_lane(ctx, spawn_time, dm, max_text_rows, scroll_speed)
         dm.target_y = text_top + row * row_height
         dm.current_y = dm.target_y
@@ -97,10 +101,12 @@ class DanmakuBurner:
             video_path = Path(video_in)
             self.video_out = str(video_path.parent / f"{video_path.stem}-弹幕版.mp4")
         validate_output_path(self.video_out, force)
+        self._render_scale = max(1.0, float(self._config.style.render_scale))
         self._asset_provider = AssetLoader(
             font_size=self._config.style.font_size,
             font_family=self._config.style.font_family,
             emoji_style=self._config.style.emoji,
+            render_scale=self._render_scale,
         )
         self._frame_encoder = FFmpegManager(video_in, self.video_out, encode_mode, self._config.encode, self._config.system)
 
@@ -163,7 +169,10 @@ class DanmakuBurner:
             start_frame, end_frame = 0, total_frames
             in_ss, in_t = 0.0, None
 
-        ffmpeg_cmd = self._frame_encoder.build_command(fps, w, h, layer_params, in_ss, in_t)
+        ffmpeg_cmd = self._frame_encoder.build_command(
+            fps, w, h, layer_params, in_ss, in_t,
+            render_scale=self._render_scale,
+        )
         logger.info("[6/8] 构建编码命令")
 
         run_failed = False
@@ -208,7 +217,7 @@ class DanmakuBurner:
         frame_encoder = self._frame_encoder
 
         layout_ctx = LayoutContext()
-        renderer = DanmakuRenderer(layer_params)
+        renderer = DanmakuRenderer(layer_params, scale=self._render_scale)
 
         total_text_danmaku = len(danmaku_pool)
 
