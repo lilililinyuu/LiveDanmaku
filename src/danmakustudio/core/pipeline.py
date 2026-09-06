@@ -86,7 +86,8 @@ def download_items(
 
     cmd = ["yt-dlp", "--newline"]
     if section:
-        cmd += ["--download-sections", f"*{section}"]
+        # 统一在此处补 "*" 前缀，调用方传 "5:01-10:43" 或 "*5:01-10:43" 均可
+        cmd += ["--download-sections", "*" + section.lstrip("*")]
     if want_video:
         cmd += ["-f", fmt]
     else:

@@ -2,8 +2,6 @@
 
 import subprocess
 
-import pytest
-
 from danmakustudio.core.pipeline import download_items
 from danmakustudio.ui.worker import DownloadWorker
 
@@ -53,6 +51,21 @@ def test_download_items_passes_sections(monkeypatch, tmp_path):
     cmd = captured["cmd"]
     assert "--download-sections" in cmd
     assert cmd[cmd.index("--download-sections") + 1] == "*5:01-10:43"
+    # 界面层可能已带 "*" 前缀，不应重复叠加
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+
+    def fake_popen2(cmd, **kwargs):
+        captured["cmd2"] = cmd
+        return _FakePopen([str(tmp_path / "视频2.mp4") + "\n"])
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen2)
+    download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=True, want_chat=False, want_thumbnail=False,
+        section="*11:16:45-11:20:55",
+    )
+    assert captured["cmd2"][captured["cmd2"].index("--download-sections") + 1] == "*11:16:45-11:20:55"
+    assert "**" not in captured["cmd2"][captured["cmd2"].index("--download-sections") + 1]
 
 
 def test_download_items_without_sections_omits_arg(monkeypatch, tmp_path):
