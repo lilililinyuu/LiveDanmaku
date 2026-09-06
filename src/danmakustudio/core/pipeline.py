@@ -59,6 +59,7 @@ def download_items(
     want_chat: bool,
     want_thumbnail: bool,
     on_output: Callable[[str], None] | None = None,
+    section: str | None = None,
 ) -> dict[str, Path | None]:
     """按需下载视频 / 实时弹幕 JSON / 封面，三者可任意组合。
 
@@ -67,6 +68,8 @@ def download_items(
     未选择的项为 None。
 
     on_output: yt-dlp 每输出一行（含下载进度）时调用一次，用于界面日志。
+    section: 下载指定片段（yt-dlp --download-sections），形如 "5:01-10:43"，
+    单边界可用 "5:01-" / "-10:43"；None = 下载完整视频。
     """
     if not (want_video or want_chat or want_thumbnail):
         raise DanmakuStudioError("未选择任何要下载的内容。")
@@ -82,6 +85,8 @@ def download_items(
     before = {p for p in out_dir.iterdir() if p.is_file()}
 
     cmd = ["yt-dlp", "--newline"]
+    if section:
+        cmd += ["--download-sections", f"*{section}"]
     if want_video:
         cmd += ["-f", fmt]
     else:

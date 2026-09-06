@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -1096,6 +1097,20 @@ class DanmakuStudioWindow(QWidget):
             content_row.addWidget(check)
         content_row.addStretch(1)
         form.addRow("下载内容", content_row)
+        section_row = QHBoxLayout()
+        section_row.setSpacing(8)
+        self.dl_section_start_edit = QLineEdit()
+        self.dl_section_start_edit.setPlaceholderText("如 5:01（留空 = 从开头）")
+        self.dl_section_start_edit.setToolTip("片段起点，格式 分:秒 或 时:分:秒")
+        section_row.addWidget(self.dl_section_start_edit)
+        dash = QLabel("–")
+        section_row.addWidget(dash)
+        self.dl_section_end_edit = QLineEdit()
+        self.dl_section_end_edit.setPlaceholderText("如 10:43（留空 = 到结尾）")
+        self.dl_section_end_edit.setToolTip("片段终点，格式 分:秒 或 时:分:秒")
+        section_row.addWidget(self.dl_section_end_edit)
+        section_row.addStretch(1)
+        form.addRow("下载片段", section_row)
         dir_row = QHBoxLayout()
         dir_row.setSpacing(8)
         self.dl_dir_edit = QLineEdit()
@@ -1585,6 +1600,20 @@ class DanmakuStudioWindow(QWidget):
         from ..core.pipeline import _YTDLP_FORMAT
 
         out_dir = self.dl_dir_edit.text().strip() or self.last_dir
+        section = None
+        start_text = self.dl_section_start_edit.text().strip()
+        end_text = self.dl_section_end_edit.text().strip()
+        if start_text or end_text:
+            time_re = re.compile(r"^\d{1,2}(:\d{2}){0,2}$")
+            if (start_text and not time_re.match(start_text)) or (
+                end_text and not time_re.match(end_text)
+            ):
+                QMessageBox.warning(
+                    self, "提示",
+                    "片段时间格式应为 分:秒 或 时:分:秒（如 5:01、1:02:30）。"
+                )
+                return
+            section = f"*{start_text or ''}-{end_text or ''}"
         self.btn_download_start.setEnabled(False)
         self._set_status("正在下载", "busy")
         self.append_log("")
@@ -1596,6 +1625,7 @@ class DanmakuStudioWindow(QWidget):
             want_video=want_video,
             want_chat=want_chat,
             want_thumbnail=want_thumbnail,
+            section=section,
         )
         self.download_worker.log.connect(self.append_log)
         self.download_worker.succeeded.connect(self._on_download_succeeded)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QRectF, QSize, Signal, QStringListModel
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -20,6 +20,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QCheckBox,
+    QCompleter,
     QColorDialog,
     QComboBox,
     QDoubleSpinBox,
@@ -240,6 +241,28 @@ class StylePreview(QWidget):
     def render_scale(self) -> float:
         return self._scale
 
+    def _sample_font(self) -> QFont:
+        """按面板当前样式构建预览用字体。"""
+        style = self._panel.current_style()
+        font = QFont()
+        families = ([style.font_family] if style.font_family else []) + [
+            "Microsoft YaHei",
+            "Segoe UI",
+            "Segoe UI Emoji",
+            "Segoe UI Symbol",
+        ]
+        font.setFamilies(families)
+        font.setPointSize(style.font_size)
+        font.setBold(True)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferQuality)
+        return font
+
+    def minimumSizeHint(self) -> QSize:
+        """预览区至少要能完整展示 4 行样本（含表情行），避免被遮挡。"""
+        fm = QFontMetrics(self._sample_font())
+        needed = 10 + 4 * (fm.height() + 2) + 6
+        return QSize(240, needed)
+
     def _load_emoji_images(self) -> dict[str, QImage]:
         """加载预览用本地表情原图；缺失时忽略，对应文字按原样显示。"""
         images: dict[str, QImage] = {}
@@ -273,17 +296,7 @@ class StylePreview(QWidget):
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         style = self._panel.current_style()
-        font = QFont()
-        families = ([style.font_family] if style.font_family else []) + [
-            "Microsoft YaHei",
-            "Segoe UI",
-            "Segoe UI Emoji",
-            "Segoe UI Symbol",
-        ]
-        font.setFamilies(families)
-        font.setPointSize(style.font_size)
-        font.setBold(True)
-        font.setStyleStrategy(QFont.StyleStrategy.PreferQuality)
+        font = self._sample_font()
         fm = QFontMetrics(font)
         line_height = fm.height()
 
@@ -311,6 +324,18 @@ class StylePreview(QWidget):
             ("sample", True),      # 英文 · 会员样式
             (emoji_text, False),   # 连续表情
         ]
+        # 内容超出控件高度时整体等比缩小，保证表情行完整可见
+        needed = 10 + sum(
+            (DanmakuLayoutBuilder(fm=fm, emoji_cache=emoji_cache,
+                                  max_content_width=1, line_height=line_height,
+                                  style=style).build(
+                DanmakuEvent(time=0.0, user="u", text=t, is_membership=m)
+            ).height + 2)
+            for t, m in samples
+        ) + 4
+        fit = min(1.0, self.height() / max(1.0, needed))
+        if fit < 1.0:
+            painter.scale(fit, fit)
         for text, is_member in samples:
             event = DanmakuEvent(
                 time=0.0,
@@ -319,7 +344,7 @@ class StylePreview(QWidget):
                 is_membership=is_member,
             )
             layout = builder.build(event)
-            layout.pre_render(font, emoji_cache)
+            layout.pre_render(font, emoji_cache, scale=s)
             painter.drawImage(10, y, layout.cached_image)
             # 行间仅留 2px 间隙（缓存图已含阴影预留），预览更紧凑
             y += layout.height + 2
@@ -399,11 +424,21 @@ class StylePanel(QWidget):
         common = QFormLayout()
         common.setVerticalSpacing(14)
         common.setHorizontalSpacing(12)
+        self._font_favorites: set[str] = set()
         self.font_combo = QComboBox()
-        self.font_combo.addItem("默认（内置回退字体）", "")
-        for family in sorted(QFontDatabase.families()):
-            self.font_combo.addItem(family, family)
+        self.font_combo.setEditable(True)
+        self.font_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.font_combo.setMinimumHeight(38)
+        # 输入即联想：按字体名包含匹配（不分大小写），回车/失焦确认
+        self._font_completer_model = QStringListModel(self.font_combo)
+        font_completer = QCompleter(self._font_completer_model, self.font_combo)
+        font_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        font_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.font_combo.setCompleter(font_completer)
+        # PySide6 此版本无 QComboBox.editFinished，用内嵌输入框的编辑完成信号
+        self.font_combo.lineEdit().editingFinished.connect(self._validate_font_edit)
+        self._fill_font_items()
+        self._active_font_family = self.font_combo.currentData() or ""
         font_row = QHBoxLayout()
         font_row.setSpacing(8)
         font_row.addWidget(self.font_combo)
@@ -411,6 +446,12 @@ class StylePanel(QWidget):
         self.font_lock_check.setToolTip("锁定后字体类型不可改动，防止误触")
         self.font_lock_check.toggled.connect(self._update_font_lock)
         font_row.addWidget(self.font_lock_check)
+        self.font_fav_btn = QPushButton("★ 收藏")
+        self.font_fav_btn.setToolTip(
+            "把当前字体加入/移出收藏（收藏的字体排在列表最前并带 ★）"
+        )
+        self.font_fav_btn.clicked.connect(self._toggle_font_favorite)
+        font_row.addWidget(self.font_fav_btn)
         common.addRow("字体类型", font_row)
 
         size_row = QHBoxLayout()
@@ -422,6 +463,18 @@ class StylePanel(QWidget):
         self.font_size_spin.setFixedWidth(80)
         size_row.addWidget(self.font_size_spin)
         size_row.addStretch(1)
+        self.render_scale_spin = QDoubleSpinBox()
+        self.render_scale_spin.setRange(1.0, 4.0)
+        self.render_scale_spin.setSingleStep(0.5)
+        self.render_scale_spin.setDecimals(1)
+        self.render_scale_spin.setValue(1.0)
+        self.render_scale_spin.setSuffix(" 倍")
+        self.render_scale_spin.setMinimumHeight(38)
+        self.render_scale_spin.setToolTip(
+            "渲染超采样倍率：预览与压制输出同步生效，越高文字边缘越细腻"
+        )
+        self.render_scale_spin.valueChanged.connect(self._apply_render_scale)
+        size_row.addWidget(self.render_scale_spin)
         size_row.addWidget(QLabel("预览背景"))
         self.preview_bg_btn = ColorButton()
         self.preview_bg_btn.setToolTip("预览区背景颜色（仅界面显示，不影响压制输出）")
@@ -466,23 +519,6 @@ class StylePanel(QWidget):
         preview_layout.addWidget(preview_title)
         self.preview = StylePreview(self)
         preview_layout.addWidget(self.preview, 1)
-        scale_row = QHBoxLayout()
-        scale_row.setSpacing(8)
-        scale_row.addWidget(QLabel("渲染精度"))
-        self.render_scale_spin = QDoubleSpinBox()
-        self.render_scale_spin.setRange(1.0, 4.0)
-        self.render_scale_spin.setSingleStep(0.5)
-        self.render_scale_spin.setDecimals(1)
-        self.render_scale_spin.setValue(1.0)
-        self.render_scale_spin.setSuffix(" 倍")
-        self.render_scale_spin.setMinimumHeight(28)
-        self.render_scale_spin.setToolTip(
-            "弹幕文字渲染超采样倍率：预览与压制输出同步生效，越高文字越细腻"
-        )
-        self.render_scale_spin.valueChanged.connect(self._apply_render_scale)
-        scale_row.addWidget(self.render_scale_spin)
-        scale_row.addStretch(1)
-        preview_layout.addLayout(scale_row)
         preview_card.setFixedWidth(300)
         columns.addWidget(preview_card)
 
@@ -497,6 +533,63 @@ class StylePanel(QWidget):
     def _update_font_lock(self, locked: bool) -> None:
         """锁定后字体下拉不可改动（若整个内容区已禁用则保持禁用）。"""
         self.font_combo.setEnabled((not locked) and self.content.isEnabled())
+
+    def _fill_font_items(self, keep: str | None = None) -> None:
+        """重建字体下拉项：收藏置顶（★ 前缀），其余按名称排序。"""
+        families = sorted(QFontDatabase.families())
+        favs = sorted(f for f in self._font_favorites if f in families)
+        current = keep if keep is not None else self.font_combo.currentData()
+        self.font_combo.blockSignals(True)
+        self.font_combo.clear()
+        for family in favs:
+            self.font_combo.addItem("★ " + family, family)
+        for family in families:
+            if family not in self._font_favorites:
+                self.font_combo.addItem(family, family)
+        if current:
+            idx = self.font_combo.findData(current)
+            if idx >= 0:
+                self.font_combo.setCurrentIndex(idx)
+        self.font_combo.blockSignals(False)
+        self._font_completer_model.setStringList(
+            ["★ " + f for f in favs]
+            + [f for f in families if f not in self._font_favorites]
+        )
+
+    def _validate_font_edit(self) -> None:
+        """可输入模式下回车/失焦：名称有效则选中，无效则还原。"""
+        text = self.font_combo.currentText().lstrip("★").strip()
+        target = next(
+            (f for f in self._all_font_names() if f.lower() == text.lower()), None
+        )
+        if target is None:
+            keep = self._active_font_family or ""
+            idx = self.font_combo.findData(keep)
+            self.font_combo.setCurrentIndex(max(0, idx))
+            return
+        idx = self.font_combo.findData(target)
+        self.font_combo.setCurrentIndex(idx)
+        self._active_font_family = target
+        self._update_font_fav_btn()
+
+    def _toggle_font_favorite(self) -> None:
+        family = self.font_combo.currentData()
+        if not family:
+            return
+        if family in self._font_favorites:
+            self._font_favorites.discard(family)
+        else:
+            self._font_favorites.add(family)
+        self._fill_font_items(keep=family)
+        self._update_font_fav_btn()
+
+    def _update_font_fav_btn(self) -> None:
+        family = self.font_combo.currentData()
+        fav = family in self._font_favorites
+        self.font_fav_btn.setText("取消收藏" if fav else "★ 收藏")
+
+    def _all_font_names(self) -> list[str]:
+        return list(QFontDatabase.families())
 
     def _apply_preview_bg(self) -> None:
         self.preview.set_bg_color(self.preview_bg_btn.color_hex())
@@ -590,6 +683,7 @@ class StylePanel(QWidget):
             "preview_bg": self.preview_bg_btn.color_hex() or StylePreview.DEFAULT_BG,
             "font_lock": self.font_lock_check.isChecked(),
             "render_scale": self.render_scale_spin.value(),
+            "font_favorites": sorted(self._font_favorites),
         }
         try:
             gui_style_path().write_text(
@@ -621,6 +715,12 @@ class StylePanel(QWidget):
             state.get("preview_bg") or StylePreview.DEFAULT_BG
         )
         self.font_lock_check.setChecked(bool(state.get("font_lock", False)))
+        known = set(QFontDatabase.families())
+        self._font_favorites = {
+            f for f in state.get("font_favorites", []) if f in known
+        }
+        self._fill_font_items(keep=self.font_combo.currentData() or None)
+        self._update_font_fav_btn()
         self.render_scale_spin.setValue(
             float(state.get("render_scale", 1.0) or 1.0)
         )

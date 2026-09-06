@@ -231,11 +231,13 @@ class DownloadWorker(QThread):
         want_video: bool,
         want_chat: bool,
         want_thumbnail: bool,
+        section: str | None = None,
     ):
         super().__init__()
         self.url = url
         self.fmt = fmt
-        self.out_dir = Path(out_dir)   # 界面传入的可能是字符串
+        self.out_dir = Path(out_dir)
+        self.section = section   # 界面传入的可能是字符串
         self.want_video = want_video
         self.want_chat = want_chat
         self.want_thumbnail = want_thumbnail
@@ -251,6 +253,7 @@ class DownloadWorker(QThread):
                 want_chat=self.want_chat,
                 want_thumbnail=self.want_thumbnail,
                 on_output=self.log.emit,
+                section=self.section,
             )
         except DanmakuStudioError as e:
             self.failed.emit(str(e))
