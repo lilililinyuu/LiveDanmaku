@@ -227,9 +227,18 @@ class StylePreview(QWidget):
         super().__init__(parent)
         self._panel = panel
         self._bg = QColor(self.DEFAULT_BG)
+        self._scale = 1.0
         self.setObjectName("stylePreview")
         self.setMinimumHeight(170)
         self._emoji_images = self._load_emoji_images()
+
+    def set_render_scale(self, scale: float) -> None:
+        """设置渲染超采样倍率并重绘。"""
+        self._scale = max(1.0, float(scale))
+        self.update()
+
+    def render_scale(self) -> float:
+        return self._scale
 
     def _load_emoji_images(self) -> dict[str, QImage]:
         """加载预览用本地表情原图；缺失时忽略，对应文字按原样显示。"""
@@ -250,8 +259,16 @@ class StylePreview(QWidget):
         return self._bg.name()
 
     def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), self._bg)
+        # 与压制管线一致的超采样：在 s 倍画布上渲染样本，再缩回控件尺寸
+        s = self._scale
+        canvas = QImage(
+            max(1, round(self.width() * s)),
+            max(1, round(self.height() * s)),
+            QImage.Format.Format_ARGB32,
+        )
+        canvas.fill(self._bg)
+        painter = QPainter(canvas)
+        painter.scale(s, s)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
@@ -307,6 +324,12 @@ class StylePreview(QWidget):
             # 行间仅留 2px 间隙（缓存图已含阴影预留），预览更紧凑
             y += layout.height + 2
         painter.end()
+
+        # 超采样画布缩回控件尺寸展示
+        out = QPainter(self)
+        out.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        out.drawImage(self.rect(), canvas)
+        out.end()
 
 
 def _emoji_page() -> tuple[QWidget, QDoubleSpinBox, QDoubleSpinBox, QSpinBox]:
@@ -443,6 +466,23 @@ class StylePanel(QWidget):
         preview_layout.addWidget(preview_title)
         self.preview = StylePreview(self)
         preview_layout.addWidget(self.preview, 1)
+        scale_row = QHBoxLayout()
+        scale_row.setSpacing(8)
+        scale_row.addWidget(QLabel("渲染精度"))
+        self.render_scale_spin = QDoubleSpinBox()
+        self.render_scale_spin.setRange(1.0, 4.0)
+        self.render_scale_spin.setSingleStep(0.5)
+        self.render_scale_spin.setDecimals(1)
+        self.render_scale_spin.setValue(1.0)
+        self.render_scale_spin.setSuffix(" 倍")
+        self.render_scale_spin.setMinimumHeight(28)
+        self.render_scale_spin.setToolTip(
+            "弹幕文字渲染超采样倍率：预览与压制输出同步生效，越高文字越细腻"
+        )
+        self.render_scale_spin.valueChanged.connect(self._apply_render_scale)
+        scale_row.addWidget(self.render_scale_spin)
+        scale_row.addStretch(1)
+        preview_layout.addLayout(scale_row)
         preview_card.setFixedWidth(300)
         columns.addWidget(preview_card)
 
@@ -460,6 +500,13 @@ class StylePanel(QWidget):
 
     def _apply_preview_bg(self) -> None:
         self.preview.set_bg_color(self.preview_bg_btn.color_hex())
+
+    def _apply_render_scale(self, value: float) -> None:
+        self.preview.set_render_scale(value)
+
+    def render_scale_value(self) -> float:
+        """当前渲染超采样倍率（压制输出与预览共用）。"""
+        return self.render_scale_spin.value()
 
     def _wire_preview(self) -> None:
         """控件变化时刷新实时预览。"""
@@ -542,6 +589,7 @@ class StylePanel(QWidget):
             },
             "preview_bg": self.preview_bg_btn.color_hex() or StylePreview.DEFAULT_BG,
             "font_lock": self.font_lock_check.isChecked(),
+            "render_scale": self.render_scale_spin.value(),
         }
         try:
             gui_style_path().write_text(
@@ -573,3 +621,6 @@ class StylePanel(QWidget):
             state.get("preview_bg") or StylePreview.DEFAULT_BG
         )
         self.font_lock_check.setChecked(bool(state.get("font_lock", False)))
+        self.render_scale_spin.setValue(
+            float(state.get("render_scale", 1.0) or 1.0)
+        )

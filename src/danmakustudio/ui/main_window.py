@@ -347,6 +347,22 @@ class DanmakuStudioWindow(QWidget):
         self.btn_config.clicked.connect(self.choose_config)
         options.addWidget(self.btn_config, 1, 2)
 
+        scale_label = QLabel("渲染精度")
+        scale_label.setObjectName("fieldLabel")
+        scale_row = QHBoxLayout()
+        scale_row.setSpacing(8)
+        self.render_scale_spin = QDoubleSpinBox()
+        self.render_scale_spin.setRange(1.0, 4.0)
+        self.render_scale_spin.setSingleStep(0.5)
+        self.render_scale_spin.setDecimals(1)
+        self.render_scale_spin.setValue(1.0)
+        self.render_scale_spin.setSuffix(" 倍")
+        self.render_scale_spin.setToolTip(
+            "弹幕文字渲染超采样倍率：先按倍率放大渲染再缩回视频尺寸，"
+            "越高文字边缘越细腻（内存/CPU 占用略增）；1 = 原始清晰度。"
+        )
+        scale_row.addWidget(self.render_scale_spin)
+        scale_row.addStretch(1)
         first_label = QLabel("首条弹幕时间")
         first_label.setObjectName("fieldLabel")
         options.addWidget(first_label, 2, 0)
@@ -439,24 +455,6 @@ class DanmakuStudioWindow(QWidget):
         drop_row.addStretch(1)
         options.addLayout(drop_row, 5, 1)
 
-        scale_label = QLabel("渲染精度")
-        scale_label.setObjectName("fieldLabel")
-        options.addWidget(scale_label, 6, 0)
-        scale_row = QHBoxLayout()
-        scale_row.setSpacing(8)
-        self.render_scale_spin = QDoubleSpinBox()
-        self.render_scale_spin.setRange(1.0, 4.0)
-        self.render_scale_spin.setSingleStep(0.5)
-        self.render_scale_spin.setDecimals(1)
-        self.render_scale_spin.setValue(1.0)
-        self.render_scale_spin.setSuffix(" 倍")
-        self.render_scale_spin.setToolTip(
-            "弹幕文字渲染超采样倍率：先按倍率放大渲染再缩回视频尺寸，"
-            "越高文字边缘越细腻（内存/CPU 占用略增）；1 = 原始清晰度。"
-        )
-        scale_row.addWidget(self.render_scale_spin)
-        scale_row.addStretch(1)
-        options.addLayout(scale_row, 6, 1)
         settings_layout.addLayout(options)
 
         style_card = QFrame()
@@ -478,6 +476,8 @@ class DanmakuStudioWindow(QWidget):
         style_description.setObjectName("sectionDescription")
         style_layout.addWidget(style_description)
         self.style_panel = StylePanel()
+        # 渲染精度控件位于样式面板，别名供运行锁与压制参数使用
+        self.render_scale_spin = self.style_panel.render_scale_spin
         style_layout.addWidget(self.style_panel)
 
         # 侧边导航 + 功能页：压制设置 / 弹幕样式 / JSON 转 XML / 下载内容
@@ -1249,11 +1249,15 @@ class DanmakuStudioWindow(QWidget):
             self._update_clip_start_enabled()
 
     def _effective_config(self) -> DanmakuConfig:
-        """按界面当前设置构建有效配置（配置文件 + 样式覆盖 + 首条弹幕时间）。"""
+        """按界面当前设置构建有效配置（配置文件 + 样式覆盖 + 渲染精度 + 首条弹幕时间）。"""
         config = load_config(self.config_edit.text().strip() or None)
         overrides = self.style_panel.style_overrides()
         if overrides is not None:
             config = apply_style_overrides(config, overrides)
+        config = replace(
+            config,
+            style=replace(config.style, render_scale=self.style_panel.render_scale_value()),
+        )
         if self.first_danmaku_check.isChecked():
             config = replace(
                 config,
