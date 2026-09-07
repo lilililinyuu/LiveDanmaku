@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import threading
@@ -13,13 +14,31 @@ from loguru import logger
 
 from ..errors import DanmakuStudioError
 
-_YTDLP_FORMAT = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
+_PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "all_proxy")
+
 _VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".flv", ".mov", ".ts", ".avi")
 _IMAGE_EXTS = (".webp", ".jpg", ".jpeg", ".png", ".avif", ".jfif", ".gif")
 
-# Windows 的 GUI 进程没有可继承的控制台。显式禁止子进程创建新控制台窗口；
-# 其他平台使用 0，保持 subprocess 的默认行为。
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _child_env(proxy: str | None) -> dict[str, str] | None:
+    """构造 yt-dlp/ffmpeg 子进程环境。
+
+    proxy 非 None 时：剥离环境中可能失配的代理变量（代理工具常残留
+    失效代理），显式写入该代理，并对本地地址直连（保证本地 POT 服务
+    可达）。proxy 为 None 时继承当前环境不变。
+    """
+    if proxy is None:
+        return None
+    env = os.environ.copy()
+    for key in list(env):
+        if key.lower() in _PROXY_ENV_KEYS:
+            del env[key]
+    env["http_proxy"] = proxy
+    env["https_proxy"] = proxy
+    env["no_proxy"] = "127.0.0.1,localhost"
+    return env
 
 
 def parse_ytdlp_paths(lines: list[str]) -> tuple[Path | None, Path | None]:
@@ -39,7 +58,8 @@ def parse_ytdlp_paths(lines: list[str]) -> tuple[Path | None, Path | None]:
             jsons.append(path)
         elif (
             video is None
-            and path.suffix.lower() in _VIDEO_EXTS
+            and path.suffix.lower()
+            in (".mp4", ".mkv", ".webm", ".flv", ".mov", ".ts", ".avi")
         ):
             video = path
     chat: Path | None = next(
@@ -60,8 +80,13 @@ def download_items(
     want_thumbnail: bool,
     on_output: Callable[[str], None] | None = None,
     section: str | None = None,
+    proxy: str = "",
 ) -> dict[str, Path | None]:
     """按需下载视频 / 实时弹幕 JSON / 封面，三者可任意组合。
+
+    视频与弹幕由两个并行 yt-dlp 进程分别下载：--download-sections
+    与 live_chat 抓取同进程互斥（弹幕回放分片数不定，会长时间阻塞
+    视频下载），拆分后互不阻塞。
 
     封面会统一转为 PNG 并清理原始图片。返回
     {'video': Path|None, 'chat': Path|None, 'thumbnail': Path|None}，
@@ -70,6 +95,8 @@ def download_items(
     on_output: yt-dlp 每输出一行（含下载进度）时调用一次，用于界面日志。
     section: 下载指定片段（yt-dlp --download-sections），形如 "5:01-10:43"，
     单边界可用 "5:01-" / "-10:43"；None = 下载完整视频。
+    proxy: 显式代理（--proxy）；非空时还会剥离子进程环境中可能失配的
+    代理变量，避免环境残留代理干扰下载与 ffmpeg 切片。
     """
     if not (want_video or want_chat or want_thumbnail):
         raise DanmakuStudioError("未选择任何要下载的内容。")
@@ -83,73 +110,98 @@ def download_items(
         )
     out_dir.mkdir(parents=True, exist_ok=True)
     before = {p for p in out_dir.iterdir() if p.is_file()}
+    child_env = _child_env(proxy)
 
-    cmd = ["yt-dlp", "--newline"]
-    if section:
-        # 统一在此处补 "*" 前缀，调用方传 "5:01-10:43" 或 "*5:01-10:43" 均可
-        cmd += ["--download-sections", "*" + section.lstrip("*")]
-    if want_video:
-        cmd += ["-f", fmt]
-    else:
-        cmd += ["--skip-download"]
+    spawned: list[tuple[str, subprocess.Popen, list[str], deque]] = []
+    error_messages: list[str] = []
+
+    def _spawn(label: str, cmd: list[str]) -> None:
+        logger.info("启动 yt-dlp ({}): {}", label, " ".join(cmd))
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        stdout_pipe = process.stdout
+        stderr_pipe = process.stderr
+        assert stdout_pipe is not None and stderr_pipe is not None
+        lines: list[str] = []
+        tail: deque[str] = deque(maxlen=30)
+
+        def _drain_out() -> None:
+            for raw in stdout_pipe:
+                line_str = raw.strip()
+                if not line_str:
+                    continue
+                lines.append(line_str)
+                if on_output is not None:
+                    on_output(line_str)
+
+        def _drain_err() -> None:
+            for raw in stderr_pipe:
+                line_str = raw.strip()
+                if line_str:
+                    tail.append(line_str)
+
+        threading.Thread(target=_drain_out, daemon=True).start()
+        threading.Thread(target=_drain_err, daemon=True).start()
+        spawned.append((label, process, lines, tail))
+
+    if want_video or want_thumbnail:
+        video_cmd = ["yt-dlp", "--newline"]
+        if section:
+            video_cmd += ["--download-sections", f"*{section.lstrip('*')}"]
+        if want_video:
+            video_cmd += ["-f", fmt]
+            if "+" in fmt:
+                video_cmd += ["--merge-output-format", "mp4"]
+        else:
+            video_cmd += ["--skip-download", "--write-thumbnail"]
+        video_cmd += [
+            "-o", str(out_dir / "%(title)s.%(ext)s"),
+            "--print", "after_move:filepath",
+            url,
+        ]
+        _spawn("视频", video_cmd)
     if want_chat:
-        cmd += ["--write-subs", "--sub-langs", "live_chat"]
-    if want_thumbnail:
-        cmd += ["--write-thumbnail"]
-    cmd += [
-        "-o", str(out_dir / "%(title)s.%(ext)s"),
-        "--print", "after_move:filepath",
-        url,
-    ]
+        chat_cmd = [
+            "yt-dlp", "--newline", "--skip-download", "--write-subs",
+            "--sub-langs", "live_chat",
+            "-o", str(out_dir / "%(title)s.%(ext)s"),
+            "--print", "after_move:filepath",
+            url,
+        ]
+        _spawn("弹幕", chat_cmd)
 
-    logger.info("下载视频/弹幕/封面...")
-    # 流式读取 stdout：进度行即时回调给界面；stderr 由独立线程收集，
-    # 避免管道缓冲区写满导致 yt-dlp 卡死
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        creationflags=_CREATE_NO_WINDOW,
-    )
-    stdout_pipe = process.stdout
-    stderr_pipe = process.stderr
-    assert stdout_pipe is not None and stderr_pipe is not None
-    stderr_tail: deque[str] = deque(maxlen=30)
+    video: Path | None = None
+    chat: Path | None = None
+    error_messages: list[str] = []
+    for label, process, lines, tail in spawned:
+        returncode = process.wait()
+        if returncode != 0:
+            error_messages.append(
+                f"{label}下载失败（退出码 {returncode}）: "
+                + ("\\n".join(list(tail)[-10:]) or "无输出")
+            )
+        if label == "视频":
+            video, _ = parse_ytdlp_paths(lines)
+        else:
+            _, chat = parse_ytdlp_paths(lines)
 
-    def _drain_stderr() -> None:
-        for raw in stderr_pipe:
-            line_str = raw.strip()
-            if line_str:
-                stderr_tail.append(line_str)
-
-    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-    stderr_thread.start()
-
-    lines: list[str] = []
-    for raw in stdout_pipe:
-        line_str = raw.strip()
-        if not line_str:
-            continue
-        if on_output is not None:
-            on_output(line_str)
-        lines.append(line_str)
-
-    return_code = process.wait()
-    stderr_thread.join(timeout=5)
-
-    video, chat = parse_ytdlp_paths(lines)
-
-    # --print after_move:filepath 只打印视频路径，不打印随视频写入的
-    # 弹幕 JSON；stdout 中找不到时从下载目录的新增文件回退查找
-    if want_chat and chat is None:
-        chat = _find_new_file(out_dir, before, ".live_chat.json", ".json")
-        if chat is not None:
-            logger.info("从下载目录找到弹幕 JSON: {}", chat.name)
+    # --print 只打印部分下载的路径：缺失时从下载目录的新增文件回退查找
     if want_video and video is None:
         video = _find_new_file(out_dir, before, *_VIDEO_EXTS)
         if video is not None:
             logger.info("从下载目录找到视频: {}", video.name)
+    if want_chat and chat is None:
+        chat = _find_new_file(out_dir, before, ".live_chat.json", ".json")
+        if chat is not None:
+            logger.info("从下载目录找到弹幕 JSON: {}", chat.name)
 
     thumbnail: Path | None = None
     if want_thumbnail:
@@ -161,38 +213,24 @@ def download_items(
 
     # yt-dlp 异常退出时，只要有一部分请求的内容已成功获取，就按部分
     # 成功处理（例如视频中途失败但弹幕 JSON 已完整保存）
-    if return_code != 0:
-        tail = "\n".join(list(stderr_tail)[-10:])
-        got_any = (
-            (want_video and video is not None)
-            or (want_chat and chat is not None)
-            or (want_thumbnail and thumbnail is not None)
-        )
-        if not got_any:
-            raise DanmakuStudioError(
-                f"yt-dlp 下载失败: {tail or f'退出码 {return_code}'}"
-            )
-        logger.warning("yt-dlp 异常退出（退出码 {}），已获取部分内容", return_code)
+    if error_messages and not (
+        (want_video and video is not None)
+        or (want_chat and chat is not None)
+        or (want_thumbnail and thumbnail is not None)
+    ):
+        raise DanmakuStudioError("\\n".join(error_messages))
+    for message in error_messages:
+        logger.warning("{}（已获取部分内容）", message)
         if on_output is not None:
-            on_output(f"[警告] yt-dlp 异常退出（退出码 {return_code}），已获取部分内容")
+            on_output(f"[警告] {message}（已获取部分内容）")
 
-    # 正常退出时所有请求项必须齐全；异常退出但拿到部分内容时按部分
-    # 成功返回（缺失项为 None，由调用方按实际结果处理）
-    if return_code == 0:
-        if want_video and video is None:
-            raise DanmakuStudioError("yt-dlp 输出中未找到视频文件，请检查下载结果。")
-        if want_chat and chat is None:
-            raise DanmakuStudioError("yt-dlp 输出中未找到弹幕 JSON，请检查下载结果。")
+    # 正常退出时视频必须拿到；弹幕是可选内容（很多视频没有直播弹幕）
+    if want_video and video is None and not error_messages:
+        raise DanmakuStudioError("yt-dlp 输出中未找到视频文件，请检查下载结果。")
+    if want_chat and chat is None and not error_messages:
+        logger.warning("该视频没有可下载的弹幕 JSON（可能没有直播弹幕）")
 
     return {"video": video, "chat": chat, "thumbnail": thumbnail}
-
-
-def _safe_mtime(path: Path) -> float:
-    """取文件 mtime；文件在扫描间隙被删除时返回 0（排序垫底）。"""
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return 0.0
 
 
 def _find_new_file(
@@ -252,3 +290,10 @@ def _largest_thumbnail_to_png(thumbs: list[Path]) -> Path:
     for p in thumbs:
         p.unlink(missing_ok=True)
     return png_out
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0

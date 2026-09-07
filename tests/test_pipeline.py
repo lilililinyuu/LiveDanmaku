@@ -141,7 +141,7 @@ def test_download_items_nonzero_exit(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    with pytest.raises(DanmakuStudioError, match="yt-dlp 下载失败"):
+    with pytest.raises(DanmakuStudioError, match="视频下载失败"):
         download_items(
             "http://example.com", tmp_path, "b",
             want_video=True, want_chat=False, want_thumbnail=False,
@@ -219,7 +219,7 @@ def test_download_items_total_failure_raises(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    with pytest.raises(DanmakuStudioError, match="yt-dlp 下载失败"):
+    with pytest.raises(DanmakuStudioError, match="视频下载失败"):
         download_items(
             "http://example.com", tmp_path, "b",
             want_video=True, want_chat=True, want_thumbnail=False,

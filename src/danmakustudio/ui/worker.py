@@ -232,6 +232,7 @@ class DownloadWorker(QThread):
         want_chat: bool,
         want_thumbnail: bool,
         section: str | None = None,
+        proxy: str = "",
     ):
         super().__init__()
         self.url = url
@@ -241,6 +242,7 @@ class DownloadWorker(QThread):
         self.want_video = want_video
         self.want_chat = want_chat
         self.want_thumbnail = want_thumbnail
+        self.proxy = proxy
 
     def run(self) -> None:
         from ..core.pipeline import download_items
@@ -254,6 +256,7 @@ class DownloadWorker(QThread):
                 want_thumbnail=self.want_thumbnail,
                 on_output=self.log.emit,
                 section=self.section,
+                proxy=self.proxy,
             )
         except DanmakuStudioError as e:
             self.failed.emit(str(e))

@@ -1060,6 +1060,12 @@ class DanmakuStudioWindow(QWidget):
 
     def _build_download_page(self) -> QWidget:
         """「下载内容」功能页：yt-dlp 下载视频 / 弹幕 / 封面。"""
+        try:
+            recorder_cfg = load_config(
+                self.config_edit.text().strip() or None
+            ).recorder
+        except (DanmakuStudioError, AttributeError):
+            recorder_cfg = DEFAULT_CONFIG.recorder
         card = QFrame()
         card.setObjectName("card")
         layout = QVBoxLayout(card)
@@ -1086,6 +1092,13 @@ class DanmakuStudioWindow(QWidget):
         self.dl_format_edit.setPlaceholderText("留空使用默认（优先 mp4）")
         self.dl_format_edit.setToolTip('yt-dlp 的 -f 格式字符串，例如 "bv*[height<=1080]+ba/b"')
         form.addRow("下载格式", self.dl_format_edit)
+        self.dl_proxy_edit = QLineEdit(recorder_cfg.proxy)
+        self.dl_proxy_edit.setPlaceholderText("留空 = 不使用代理")
+        self.dl_proxy_edit.setToolTip(
+            "yt-dlp --proxy，例如 http://127.0.0.1:7897；"
+            "非空时会清理环境残留代理并让 ffmpeg 切片也走该代理"
+        )
+        form.addRow("代理", self.dl_proxy_edit)
         content_row = QHBoxLayout()
         content_row.setSpacing(12)
         self.dl_video_check = CheckMarkCheckBox("视频（直播回放）")
@@ -1626,6 +1639,7 @@ class DanmakuStudioWindow(QWidget):
             want_chat=want_chat,
             want_thumbnail=want_thumbnail,
             section=section,
+            proxy=self.dl_proxy_edit.text().strip(),
         )
         self.download_worker.log.connect(self.append_log)
         self.download_worker.succeeded.connect(self._on_download_succeeded)
