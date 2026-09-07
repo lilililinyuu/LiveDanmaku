@@ -155,6 +155,8 @@ def download_items(
 
     if want_video or want_thumbnail:
         video_cmd = ["yt-dlp", "--newline"]
+        if proxy:
+            video_cmd += ["--proxy", proxy]
         if section:
             video_cmd += ["--download-sections", f"*{section.lstrip('*')}"]
         if want_video:
@@ -170,9 +172,11 @@ def download_items(
         ]
         _spawn("视频", video_cmd)
     if want_chat:
-        chat_cmd = [
-            "yt-dlp", "--newline", "--skip-download", "--write-subs",
-            "--sub-langs", "live_chat",
+        chat_cmd = ["yt-dlp", "--newline", "--skip-download", "--write-subs",
+                    "--sub-langs", "live_chat"]
+        if proxy:
+            chat_cmd += ["--proxy", proxy]
+        chat_cmd += [
             "-o", str(out_dir / "%(title)s.%(ext)s"),
             "--print", "after_move:filepath",
             url,
