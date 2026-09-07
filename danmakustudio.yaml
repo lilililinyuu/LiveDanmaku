@@ -27,7 +27,7 @@ ratio:
   max_text_rows: 20
   text_width_ratio: 0.8
   top_margin: 12
-  bottom_margin: 303
+  bottom_margin: 600
 animation:
   first_danmaku_at: 2.0
 encode:
@@ -48,6 +48,7 @@ system:
   max_queue_frames: 64
 recorder:
   proxy: socks5://127.0.0.1:7897
+  download_proxy: http://127.0.0.1:7897
   pot_token_script: D:/youtube-video-download/bgutil-pot.exe
   fmt: bestvideo+bestaudio/best
   output_template: '%(upload_date)s_%(title)s.%(ext)s'

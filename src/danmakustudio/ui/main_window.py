@@ -1092,7 +1092,7 @@ class DanmakuStudioWindow(QWidget):
         self.dl_format_edit.setPlaceholderText("留空使用默认（优先 mp4）")
         self.dl_format_edit.setToolTip('yt-dlp 的 -f 格式字符串，例如 "bv*[height<=1080]+ba/b"')
         form.addRow("下载格式", self.dl_format_edit)
-        self.dl_proxy_edit = QLineEdit(recorder_cfg.proxy)
+        self.dl_proxy_edit = QLineEdit(recorder_cfg.download_proxy)
         self.dl_proxy_edit.setPlaceholderText("留空 = 不使用代理")
         self.dl_proxy_edit.setToolTip(
             "yt-dlp --proxy，例如 http://127.0.0.1:7897；"
