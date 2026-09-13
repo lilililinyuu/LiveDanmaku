@@ -297,6 +297,23 @@ class RecordWorker(QThread):
                 final = session.finalize()
                 video = final.get("video")
                 chat = final.get("chat")
+
+                # 当前位置模式：完整录制了直播全程，裁掉起点之前的部分
+                edge = getattr(session, "live_edge", None)
+                if (
+                    edge and video is not None and video.exists()
+                    and not self.params.live_from_start
+                ):
+                    from ..core.recorder import probe_duration
+
+                    duration = probe_duration(video)
+                    if duration > edge + 30:
+                        self.log.emit(
+                            f"裁剪起点之前的内容（前 {edge:.0f} 秒）…"
+                        )
+                        trimmed = session._trim_video_start(video, edge)
+                        if trimmed is not None:
+                            video = trimmed
             except Exception as e:
                 self.failed.emit(f"录制处理失败: {e}")
                 return
@@ -322,6 +339,21 @@ class RecordWorker(QThread):
                     self.log.emit(f"已获取完整弹幕回放: {chat.name}")
                 else:
                     self.log.emit("未获取到更完整的回放弹幕，保留录制时的实时弹幕。")
+
+                # 当前位置模式：裁掉回放中早于录制起点的弹幕（与视频对齐）
+                chat_edge = getattr(session, "live_edge", None)
+                if (
+                    not self.params.live_from_start
+                    and chat_edge and chat is not None and chat.exists()
+                ):
+                    from ..input.chat2xml import filter_chat_json_by_time
+
+                    # 弹幕时间轴（timestampUsec）是绝对 Unix 时间，
+                    # 录制起点 = 会话启动的墙钟时间
+                    min_unix = session.start_wall
+                    kept = filter_chat_json_by_time(str(chat), min_unix)
+                    self.log.emit(f"弹幕已对齐录制起点（保留 {kept} 条）")
+
 
             files = [p for p in (video, chat) if p is not None]
             self.finished_rec.emit({

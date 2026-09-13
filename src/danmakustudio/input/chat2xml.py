@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -204,6 +205,43 @@ def chat_json_events(json_path: str | Path) -> tuple[list[DanmakuEvent], dict[st
             if name and url and name not in emoji_map:
                 emoji_map[name] = url
     return events, emoji_map
+
+
+def filter_chat_json_by_time(path: str | Path, min_unix: float) -> int:
+    """按墙钟时间过滤 yt-dlp live_chat JSONL（原子替换原文件）。
+
+    保留 timestampUsec >= min_unix 的消息行，用于「从当前位置录制」时
+    裁掉自动补全的整场回放中早于录制起点的弹幕。返回保留的消息数。
+    """
+    kept: list[str] = []
+    total = 0
+    for obj in parse_objects_from_file(str(path)):
+        total += 1
+        ts = None
+        if isinstance(obj, dict):
+            action = obj.get("replayChatItemAction")
+            if action:
+                for act in action.get("actions", []):
+                    item = act.get("addChatItemAction", {}).get("item")
+                    if not item:
+                        continue
+                    renderer = next(
+                        (v for v in item.values() if isinstance(v, dict)), None
+                    )
+                    if renderer:
+                        usec = renderer.get("timestampUsec")
+                        try:
+                            ts = int(usec) / 1_000_000
+                        except (TypeError, ValueError):
+                            ts = None
+                    break
+        if ts is None or ts >= min_unix:
+            kept.append(json.dumps(obj, ensure_ascii=False))
+
+    tmp = Path(path).with_name(Path(path).name + ".tmp")
+    tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    os.replace(tmp, path)
+    return len(kept)
 
 
 def convert_chat_json(
