@@ -46,7 +46,6 @@ from ..config.models import (
     DEFAULT_CONFIG,
     DanmakuConfig,
     EncodeMode,
-    RecorderParams,
     apply_style_overrides,
 )
 from ..errors import DanmakuStudioError
@@ -820,6 +819,17 @@ class DanmakuStudioWindow(QWidget):
             "录制时附带抓取 live_chat 弹幕，结束后可直接转 XML 压制"
         )
         opts_row.addWidget(self.record_chat_check)
+        opts_row.addWidget(QLabel("音画同步"))
+        self.sync_mode_combo = QComboBox()
+        self.sync_mode_combo.addItem("快速（流拷贝）", "auto")
+        self.sync_mode_combo.addItem("精确（重编码）", "exact")
+        self.sync_mode_combo.setToolTip(
+            "快速：秒级重封装，直播源时钟偏差会保留；"
+            "精确：重编码并重算时间戳，修正累积音画漂移，整理耗时与录制时长相当"
+        )
+        sync_idx = self.sync_mode_combo.findData(recorder.sync_mode)
+        self.sync_mode_combo.setCurrentIndex(max(0, sync_idx))
+        opts_row.addWidget(self.sync_mode_combo)
         opts_row.addStretch(1)
         form.addRow("选项", opts_row)
 
@@ -900,6 +910,7 @@ class DanmakuStudioWindow(QWidget):
             proxy=self.record_proxy_edit.text().strip(),
             pot_token_script=self.record_pot_edit.text().strip(),
             record_chat=self.record_chat_check.isChecked(),
+            sync_mode=self.sync_mode_combo.currentData(),
         )
 
     def _begin_record(self, params: RecordParams) -> None:

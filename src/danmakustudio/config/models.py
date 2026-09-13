@@ -193,12 +193,15 @@ class RecorderParams:
     live_from_start: bool = True               # 从直播开头录制
     record_chat: bool = True                   # 同步录制弹幕 JSON
     monitor_interval: float = 60.0             # 频道开播探测间隔（秒）
+    sync_mode: str = "auto"                    # 音画同步：auto=快速重封装 exact=精确同步（重编码）
 
     def __post_init__(self):
         if self.monitor_interval <= 0:
             raise ValueError(f"monitor_interval 必须 > 0，当前 {self.monitor_interval}")
         if not self.fmt:
             raise ValueError("fmt 不能为空字符串")
+        if self.sync_mode not in ("auto", "exact"):
+            raise ValueError(f"sync_mode 必须是 auto 或 exact，当前 {self.sync_mode}")
 
 
 # =============================================================================

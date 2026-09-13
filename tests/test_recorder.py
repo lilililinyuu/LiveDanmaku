@@ -384,3 +384,39 @@ def test_finalize_remuxes_live_ts_to_mp4(tmp_path, monkeypatch):
     assert data[4:8] == b"ftyp"
     # 弹幕 .part 已归位
     assert result["chat"] is not None and result["chat"].name == "直播.live_chat.json"
+
+
+def test_remux_exact_mode_reencodes(tmp_path):
+    """exact 模式应走重编码路径并产出规范 mp4。"""
+    import shutil as _shutil
+
+    if _shutil.which("ffmpeg") is None:
+        pytest.skip("需要 ffmpeg")
+
+    params = _params(tmp_path, sync_mode="exact")
+    session = RecordSession(params)
+
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    params.output_dir.mkdir(parents=True, exist_ok=True)
+    # ffmpeg 对非 ASCII 输出路径兼容性差，源文件用 ASCII 名生成
+    src = params.output_dir / "live.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error",
+         "-f", "lavfi", "-i", "testsrc=duration=0.5",
+         "-f", "lavfi", "-i", "sine=duration=0.5",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac",
+         "-f", "mpegts", str(src)],
+        check=True, **flags,
+    )
+
+    remuxed = session._remux_to_mp4(src)
+
+    assert remuxed is not None and remuxed == src
+    data = src.read_bytes()
+    assert data[4:8] == b"ftyp"
+
+
+def test_recorder_params_sync_mode_default():
+    assert RecorderParams().sync_mode == "auto"
+    with pytest.raises(ValueError, match="sync_mode"):
+        RecorderParams(sync_mode="bad")
