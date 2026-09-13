@@ -47,7 +47,7 @@ system:
   video_alignment: 2
   max_queue_frames: 64
 recorder:
-  proxy: socks5://127.0.0.1:7897
+  proxy: http://127.0.0.1:7897
   download_proxy: http://127.0.0.1:7897
   pot_token_script: D:/youtube-video-download/bgutil-pot.exe
   fmt: bestvideo+bestaudio/best

@@ -335,3 +335,10 @@ def test_finalize_without_merge(tmp_path, monkeypatch):
 
     assert result["video"] is not None and result["video"].name == "直播.f299.mp4"
     assert result["chat"] is not None and result["chat"].name == "直播.live_chat.json"
+
+
+def test_build_record_command_warns_on_socks(tmp_path):
+    """socks 代理时命令照常拼装（由录制页默认值避免该情况）。"""
+    cmd = build_record_command(_params(tmp_path, proxy="socks5://127.0.0.1:7897"))
+
+    assert "--proxy" in cmd and "socks5://127.0.0.1:7897" in cmd

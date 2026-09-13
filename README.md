@@ -183,7 +183,7 @@ danmakustudio
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `proxy` | socks5://127.0.0.1:7897 | 下载/探测代理，空字符串 = 不使用 |
+| `proxy` | http://127.0.0.1:7897 | 录制/探测代理，空字符串 = 不使用。注意 ffmpeg 不支持 SOCKS，录制直播必须用 http 形式 |
 | `pot_token_script` | D:/youtube-video-download/bgutil-pot.exe | bgutil-pot 路径，经 --extractor-args 传入 |
 | `fmt` | bestvideo+bestaudio/best | 录制格式：优先音视频分离流并在结束时合并，直播无双流时回退单文件 |
 | `output_template` | %(upload_date)s_%(title)s.%(ext)s | 输出文件名模板 |

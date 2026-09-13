@@ -185,7 +185,7 @@ class SystemParams:
 @dataclass(frozen=True)
 class RecorderParams:
     """直播录制参数配置"""
-    proxy: str = "socks5://127.0.0.1:7897"   # 录制代理；空字符串 = 不使用
+    proxy: str = "http://127.0.0.1:7897"   # 录制代理；ffmpeg 不支持 SOCKS，请用 http
     download_proxy: str = "http://127.0.0.1:7897"  # 下载代理（http 协议）
     pot_token_script: str = r"D:\youtube-video-download\bgutil-pot.exe"
     fmt: str = "bestvideo+bestaudio/best"      # 优先双流+合并，无双流时回退单文件

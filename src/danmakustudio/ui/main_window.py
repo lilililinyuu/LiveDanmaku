@@ -825,7 +825,10 @@ class DanmakuStudioWindow(QWidget):
 
         self.record_proxy_edit = QLineEdit(recorder.proxy)
         self.record_proxy_edit.setPlaceholderText("留空 = 不使用代理")
-        self.record_proxy_edit.setToolTip("yt-dlp --proxy，例如 socks5://127.0.0.1:7897")
+        self.record_proxy_edit.setToolTip(
+            "yt-dlp --proxy。请使用 http:// 形式（ffmpeg 不支持 SOCKS，"
+            "直播录制会因代理协议失败）；例如 http://127.0.0.1:7897"
+        )
         form.addRow("代理", self.record_proxy_edit)
 
         self.record_pot_edit = QLineEdit(recorder.pot_token_script)

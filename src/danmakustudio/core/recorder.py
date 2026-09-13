@@ -57,6 +57,11 @@ def build_record_command(
     --write-subs live_chat）；否则生成视频录制命令（不带弹幕抓取）。
     """
     cmd = ["yt-dlp", "--newline", "--encoding", "utf-8"]
+    if params.proxy.lower().startswith("socks"):
+        logger.warning(
+            "ffmpeg 不支持 SOCKS 代理，直播录制（HLS）大概率失败；"
+            "建议把代理改为 http:// 形式（大多数代理客户端同端口支持 http）"
+        )
     if params.live_from_start:
         cmd.append("--live-from-start")
     if params.proxy:
