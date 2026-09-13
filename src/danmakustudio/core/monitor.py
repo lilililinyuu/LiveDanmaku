@@ -29,7 +29,8 @@ def probe_channel_live(
     返回 (直播视频 URL, 标题)；未开播或探测失败返回 (None, "")。
     """
     probe_url = normalize_stream_url(channel_url)
-    cmd = ["yt-dlp", "--skip-download", "--print", "%(id)s|%(is_live)s|%(live_status)s|%(title).80s"]
+    cmd = ["yt-dlp", "--skip-download", "--encoding", "utf-8",
+           "--print", "%(id)s|%(is_live)s|%(live_status)s|%(title).80s"]
     if proxy:
         cmd += ["--proxy", proxy]
     if pot_token_script:

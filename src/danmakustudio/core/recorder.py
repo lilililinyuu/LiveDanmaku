@@ -56,7 +56,7 @@ def build_record_command(
     chat_only=True 时生成仅抓取弹幕的命令（--skip-download +
     --write-subs live_chat）；否则生成视频录制命令（不带弹幕抓取）。
     """
-    cmd = ["yt-dlp", "--newline"]
+    cmd = ["yt-dlp", "--newline", "--encoding", "utf-8"]
     if params.live_from_start:
         cmd.append("--live-from-start")
     if params.proxy:
@@ -376,8 +376,8 @@ def backfill_chat_replay(
     """
     replay_dir = output_dir / "弹幕回放"
     replay_dir.mkdir(parents=True, exist_ok=True)
-    cmd = ["yt-dlp", "--newline", "--skip-download", "--write-subs",
-           "--sub-langs", "live_chat"]
+    cmd = ["yt-dlp", "--newline", "--encoding", "utf-8",
+           "--skip-download", "--write-subs", "--sub-langs", "live_chat"]
     if proxy:
         cmd += ["--proxy", proxy]
     if pot_token_script:

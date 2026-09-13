@@ -148,13 +148,16 @@ def download_items(
                 line_str = raw.strip()
                 if line_str:
                     tail.append(line_str)
+                    # yt-dlp 进度条默认写 stderr，也回调给界面日志
+                    if on_output is not None:
+                        on_output(line_str)
 
         threading.Thread(target=_drain_out, daemon=True).start()
         threading.Thread(target=_drain_err, daemon=True).start()
         spawned.append((label, process, lines, tail))
 
     if want_video or want_thumbnail:
-        video_cmd = ["yt-dlp", "--newline"]
+        video_cmd = ["yt-dlp", "--newline", "--encoding", "utf-8"]
         if proxy:
             video_cmd += ["--proxy", proxy]
         if section:
@@ -167,18 +170,16 @@ def download_items(
             video_cmd += ["--skip-download", "--write-thumbnail"]
         video_cmd += [
             "-o", str(out_dir / "%(title)s.%(ext)s"),
-            "--print", "after_move:filepath",
             url,
         ]
         _spawn("视频", video_cmd)
     if want_chat:
-        chat_cmd = ["yt-dlp", "--newline", "--skip-download", "--write-subs",
-                    "--sub-langs", "live_chat"]
+        chat_cmd = ["yt-dlp", "--newline", "--encoding", "utf-8",
+                    "--skip-download", "--write-subs", "--sub-langs", "live_chat"]
         if proxy:
             chat_cmd += ["--proxy", proxy]
         chat_cmd += [
             "-o", str(out_dir / "%(title)s.%(ext)s"),
-            "--print", "after_move:filepath",
             url,
         ]
         _spawn("弹幕", chat_cmd)
