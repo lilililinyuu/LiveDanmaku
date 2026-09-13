@@ -931,10 +931,10 @@ class DanmakuStudioWindow(QWidget):
         self._begin_record(self._record_params(url))
 
     def stop_recording(self) -> None:
-        """优雅停止录制（等待 yt-dlp 收尾，保留文件）。"""
+        """请求停止录制（非阻塞；若 30 秒未优雅收尾将强制终止进程树）。"""
         if self.record_worker is None or not self.record_worker.isRunning():
             return
-        self.append_log("正在停止录制（等待 yt-dlp 收尾）…")
+        self.append_log("正在停止录制（等待 yt-dlp 收尾，最多 30 秒）…")
         self.btn_record_stop.setEnabled(False)
         self.record_worker.stop_recording()
 

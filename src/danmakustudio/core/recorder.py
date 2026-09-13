@@ -105,6 +105,22 @@ def normalize_stream_url(url: str) -> str:
     return base + "/live"
 
 
+def _replace_with_retry(src: Path, dst: Path, retries: int = 5, delay: float = 1.0) -> None:
+    """os.replace，目标被占用（如 ffmpeg 尚未完全释放）时重试。"""
+    for attempt in range(retries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == retries - 1:
+                raise
+            logger.warning(
+                "目标被占用，{} 秒后重试（{}/{}）: {}",
+                delay, attempt + 1, retries, dst,
+            )
+            time.sleep(delay)
+
+
 class RecordSession:
     """一次录制会话：进程生命周期、输出跟踪、停止与片段保存。"""
 
@@ -180,11 +196,27 @@ class RecordSession:
                 proc.terminate()
 
     def terminate_all(self) -> None:
-        """强制终止全部录制进程。"""
+        """强制终止全部录制进程（Windows 下用 taskkill /T 连子进程一起终止）。
+
+        yt-dlp 录制直播时会派生自己的 ffmpeg 子进程；只 TerminateProcess
+        父进程会留下仍在写 .part 的孤儿 ffmpeg，导致产物被占用无法整理。
+        """
         for proc in self.processes:
-            if proc.poll() is None:
-                logger.warning("录制进程未在限时内收尾，强制终止")
+            if proc.poll() is not None:
+                continue
+            logger.warning("录制进程未在限时内收尾，强制终止（含子进程）")
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True, check=False,
+                    creationflags=_CREATE_NO_WINDOW,
+                )
+            else:
                 proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
     def wait(self, stop_flag: Callable[[], bool] | None = None) -> int | None:
         """等待全部录制进程结束，返回视频进程的退出码。
@@ -304,14 +336,14 @@ class RecordSession:
             if ".live_chat.json" in lower:
                 if lower.endswith(".part"):
                     renamed = src.with_name(name[: -len(".part")])
-                    os.replace(src, renamed)
+                    _replace_with_retry(src, renamed)
                     chat_out = renamed
                 else:
                     chat_out = src
                 continue
             clean = src.with_name(re.sub(r"\.part$", "", name))
             if clean != src:
-                os.replace(src, clean)
+                _replace_with_retry(src, clean)
             if re.search(r"\.f\d+\.(mp4|m4a)$", clean.name, re.IGNORECASE):
                 media.append(clean)
             elif video_out is None:
