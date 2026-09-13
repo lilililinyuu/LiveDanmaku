@@ -293,6 +293,9 @@ class RecordSession:
             shutil.copyfile(src, dst)
             copied.append(dst)
             logger.info("已保存录制片段: {}", dst)
+            # live HLS 的 .part 实为 mpegts：重封装为规范 mp4（弹幕 json 不处理）
+            if src.name.endswith(".part") and dst.suffix.lower() == ".mp4":
+                self._remux_to_mp4(dst)
             if re.search(r"\.f\d+\.(mp4|m4a)$", dst.name, re.IGNORECASE):
                 media.append(dst)
         if len(media) >= 2:
@@ -342,12 +345,16 @@ class RecordSession:
                     chat_out = src
                 continue
             clean = src.with_name(re.sub(r"\.part$", "", name))
-            if clean != src:
+            was_part = clean != src
+            if was_part:
                 _replace_with_retry(src, clean)
             if re.search(r"\.f\d+\.(mp4|m4a)$", clean.name, re.IGNORECASE):
                 media.append(clean)
             elif video_out is None:
                 video_out = clean   # 单文件格式（如 best）直接是成品
+                if was_part:
+                    # 直播 HLS 的 .part 实为 mpegts，重封装修音画同步
+                    self._remux_to_mp4(clean)
         if len(media) >= 2:
             merged = self._merge_media(media, self.params.output_dir)
             if merged is not None:
@@ -359,6 +366,36 @@ class RecordSession:
         elif media:
             video_out = media[0]
         return {"video": video_out, "chat": chat_out}
+
+    def _remux_to_mp4(self, src: Path) -> Path | None:
+        """把 live HLS 录制的 mpegts 流重新封装为规范 mp4 容器。
+
+        强制终止录制时 yt-dlp 来不及自己重封装，.part 实为 mpegts 且
+        时间戳基准是直播已进行的秒数，直接改名为 .mp4 会音画不同步、
+        进度条异常。-c copy 秒级完成（不重编码），失败时保留原文件。
+        """
+        out = src.with_name(src.stem + ".remux.mp4")
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-fflags", "+genpts", "-i", str(src),
+            "-c", "copy", "-movflags", "+faststart",
+            "-f", "mp4", str(out),
+        ]
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=False,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        except OSError as e:
+            logger.warning("重封装失败（找不到 ffmpeg？）: {}", e)
+            return None
+        if result.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+            logger.warning("重封装失败: {}", result.stderr[-200:])
+            out.unlink(missing_ok=True)
+            return None
+        os.replace(out, src)
+        logger.info("已重封装为规范 mp4: {}", src)
+        return src
 
     def _merge_media(self, media: list[Path], target: Path) -> Path | None:
         """把分离的音视频快照用 ffmpeg -c copy 合并为单个 mp4（秒级完成）。

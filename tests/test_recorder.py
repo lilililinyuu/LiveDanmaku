@@ -342,3 +342,45 @@ def test_build_record_command_warns_on_socks(tmp_path):
     cmd = build_record_command(_params(tmp_path, proxy="socks5://127.0.0.1:7897"))
 
     assert "--proxy" in cmd and "socks5://127.0.0.1:7897" in cmd
+
+
+def test_finalize_remuxes_live_ts_to_mp4(tmp_path, monkeypatch):
+    """回归：直播 HLS 的 .part 实为 mpegts，finalize 应重封装为规范 mp4
+    （此前直接改名导致音画不同步、进度条异常）。"""
+    import shutil as _shutil
+
+    if _shutil.which("ffmpeg") is None:
+        pytest.skip("需要 ffmpeg")
+
+    params = _params(tmp_path)
+    session = RecordSession(params)
+
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    # 生成真实的 mpegts（含音视频，与直播 .part 相同的容器）
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error",
+         "-f", "lavfi", "-i", "testsrc=duration=0.5",
+         "-f", "lavfi", "-i", "sine=duration=0.5",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac",
+         "-f", "mpegts", str(staging / "v.ts")],
+        check=True, **flags,
+    )
+
+    with monkeypatch.context() as m:
+        m.setattr(subprocess, "Popen", lambda cmd, **kw: _FakePopen([]))
+        session.start()   # 记录 _before（此时输出目录为空）
+
+    _shutil.copyfile(staging / "v.ts", params.output_dir / "直播.mp4.part")
+    (params.output_dir / "直播.live_chat.json.part").write_text("{}", encoding="utf-8")
+
+    result = session.finalize()
+
+    video = result["video"]
+    assert video is not None and video.name == "直播.mp4"
+    # mp4 容器特征：偏移 4 字节起为 "ftyp"（mpegts 则以 0x47 同步字节开头）
+    data = video.read_bytes()
+    assert data[4:8] == b"ftyp"
+    # 弹幕 .part 已归位
+    assert result["chat"] is not None and result["chat"].name == "直播.live_chat.json"
