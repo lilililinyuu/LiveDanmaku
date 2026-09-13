@@ -30,13 +30,24 @@ def _params(tmp_path: Path, **overrides) -> RecordParams:
     return RecordParams(**defaults)
 
 
+class _FakeStream:
+    """供 _iter_output_lines 读取的伪流：read() 一次性返回全部文本。"""
+
+    def __init__(self, text=""):
+        self._text = text
+
+    def read(self, n=-1):
+        t, self._text = self._text, ""
+        return t
+
+
 class _FakePopen:
     """模拟录制进程：stdout 输出若干行后结束。"""
 
     def __init__(self, lines, output_dir: Path | None = None):
         self.args = []
-        self.stdout = iter(lines)
-        self.stderr = iter([])
+        self.stdout = _FakeStream("\n".join(lines) + ("\n" if lines else ""))
+        self.stderr = _FakeStream()
         self.returncode = None
         self.signals = []
 

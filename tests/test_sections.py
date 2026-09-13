@@ -6,11 +6,23 @@ from danmakustudio.core.pipeline import download_items
 from danmakustudio.ui.worker import DownloadWorker
 
 
+class _FakeStream:
+    """供 _iter_output_lines 读取的伪流。"""
+
+    def __init__(self, text=""):
+        self._text = text
+
+    def read(self, n=-1):
+        t, self._text = self._text, ""
+        return t
+
+
 class _FakePopen:
     def __init__(self, stdout_lines=(), returncode=0):
         self.args = []
-        self.stdout = iter(stdout_lines)
-        self.stderr = iter([])
+        text = "\n".join(stdout_lines) + ("\n" if stdout_lines else "")
+        self.stdout = _FakeStream(text)
+        self.stderr = _FakeStream()
         self.returncode = returncode
 
     def poll(self):

@@ -47,12 +47,24 @@ def test_download_items_no_selection():
         )
 
 
+class _FakeStream:
+    """供 _iter_output_lines 读取的伪流：read() 一次性返回全部文本。"""
+
+    def __init__(self, text=""):
+        self._text = text
+
+    def read(self, n=-1):
+        t, self._text = self._text, ""
+        return t
+
+
 class _FakePopen:
     """模拟 yt-dlp 进程：stdout 按行输出，stderr 为空。"""
 
     def __init__(self, stdout_lines, returncode=0):
-        self.stdout = iter(stdout_lines)
-        self.stderr = iter([])
+        text = "\n".join(stdout_lines) + ("\n" if stdout_lines else "")
+        self.stdout = _FakeStream(text)
+        self.stderr = _FakeStream()
         self.returncode = returncode
 
     def wait(self):
@@ -246,3 +258,23 @@ def test_download_items_passes_proxy_flag(monkeypatch, tmp_path):
     for cmd in captured["cmds"]:
         assert "--proxy" in cmd
         assert "http://127.0.0.1:7897" in cmd
+
+
+def test_iter_output_lines_splits_carriage_returns():
+    """\r 刷新的 ffmpeg/yt-dlp 进度应被拆成独立行。"""
+    from danmakustudio.core.pipeline import _iter_output_lines
+
+    class Stream:
+        text = "[download] 10%\r[download] 50%\r[download] 100%\nfilepath"
+
+        def read(self, n=-1):
+            t, self.text = self.text, ""
+            return t
+
+    lines = list(_iter_output_lines(Stream()))
+    assert lines == [
+        "[download] 10%",
+        "[download] 50%",
+        "[download] 100%",
+        "filepath",
+    ]

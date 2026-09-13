@@ -1631,6 +1631,11 @@ class DanmakuStudioWindow(QWidget):
         self._set_status("正在下载", "busy")
         self.append_log("")
         self.append_log(f"开始下载: {url}（后台进行，进度见下方日志）")
+        if section:
+            self.append_log(
+                "提示：指定片段需从视频开头顺序读取到片段起点，"
+                "长视频可能耗时较长，请以「下载完成」日志为准。"
+            )
         self.download_worker = DownloadWorker(
             url,
             self._download_format() or _YTDLP_FORMAT,

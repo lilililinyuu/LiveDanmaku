@@ -23,6 +23,24 @@ _YTDLP_FORMAT = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _iter_output_lines(stream):
+    """逐行产出子进程输出；\r 与 \n 都视为行分隔。
+
+    yt-dlp/ffmpeg 的进度条用 \r 原地刷新（不产生换行），按 \n 读取会
+    把全部进度挤成一行且到进程结束才可见；按块读取并拆分即可实时产出。
+    """
+    buf = ""
+    while True:
+        chunk = stream.read(4096)
+        if not chunk:
+            break
+        buf = (buf + chunk).replace("\r\n", "\n").replace("\r", "\n")
+        *lines, buf = buf.split("\n")
+        yield from lines
+    if buf.strip():
+        yield buf
+
+
 def _child_env(proxy: str | None) -> dict[str, str] | None:
     """构造 yt-dlp/ffmpeg 子进程环境。
 
@@ -135,7 +153,7 @@ def download_items(
         tail: deque[str] = deque(maxlen=30)
 
         def _drain_out() -> None:
-            for raw in stdout_pipe:
+            for raw in _iter_output_lines(stdout_pipe):
                 line_str = raw.strip()
                 if not line_str:
                     continue
@@ -144,7 +162,7 @@ def download_items(
                     on_output(line_str)
 
         def _drain_err() -> None:
-            for raw in stderr_pipe:
+            for raw in _iter_output_lines(stderr_pipe):
                 line_str = raw.strip()
                 if line_str:
                     tail.append(line_str)

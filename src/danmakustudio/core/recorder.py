@@ -149,7 +149,9 @@ class RecordSession:
         assert stdout_pipe is not None and stderr_pipe is not None
 
         def _drain(stream, pref: str) -> None:
-            for raw in stream:
+            from .pipeline import _iter_output_lines
+
+            for raw in _iter_output_lines(stream):
                 line_str = raw.strip()
                 if line_str and on_output is not None:
                     on_output(f"{pref}{line_str}")
@@ -401,7 +403,9 @@ def backfill_chat_replay(
     assert stdout_pipe is not None and stderr_pipe is not None
 
     def _drain(stream, pref):
-        for raw in stream:
+        from .pipeline import _iter_output_lines
+
+        for raw in _iter_output_lines(stream):
             line_str = raw.strip()
             if line_str and on_output is not None:
                 on_output(pref + line_str)
