@@ -55,4 +55,5 @@ recorder:
   live_from_start: true
   record_chat: true
   sync_mode: auto
+  av_offset: 0.0
   monitor_interval: 60.0

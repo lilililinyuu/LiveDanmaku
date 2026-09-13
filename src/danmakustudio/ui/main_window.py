@@ -41,13 +41,13 @@ from PySide6.QtWidgets import (
 
 from ..batch import BatchJob, collect_batch_jobs, find_matching_subtitle
 from ..config.loader import config_to_yaml, load_config
-from ..core.recorder import RecordParams
 from ..config.models import (
     DEFAULT_CONFIG,
     DanmakuConfig,
     EncodeMode,
     apply_style_overrides,
 )
+from ..core.recorder import RecordParams
 from ..errors import DanmakuStudioError
 from ..input.parser import parse_subtitle
 from ..input.trim import (
@@ -832,6 +832,18 @@ class DanmakuStudioWindow(QWidget):
         sync_idx = self.sync_mode_combo.findData(recorder.sync_mode)
         self.sync_mode_combo.setCurrentIndex(max(0, sync_idx))
         opts_row.addWidget(self.sync_mode_combo)
+        opts_row.addWidget(QLabel("音频补偿"))
+        self.av_offset_spin = QDoubleSpinBox()
+        self.av_offset_spin.setRange(-30.0, 30.0)
+        self.av_offset_spin.setSingleStep(0.1)
+        self.av_offset_spin.setDecimals(1)
+        self.av_offset_spin.setValue(recorder.av_offset)
+        self.av_offset_spin.setSuffix(" 秒")
+        self.av_offset_spin.setToolTip(
+            "整理录制产物时平移音频流：若录制的文件音频比视频快 N 秒，"
+            "填 +N 修正（正值 = 音频延后）；0 = 不补偿"
+        )
+        opts_row.addWidget(self.av_offset_spin)
         opts_row.addStretch(1)
         form.addRow("选项", opts_row)
 
@@ -913,6 +925,7 @@ class DanmakuStudioWindow(QWidget):
             pot_token_script=self.record_pot_edit.text().strip(),
             record_chat=self.record_chat_check.isChecked(),
             sync_mode=self.sync_mode_combo.currentData(),
+            av_offset=self.av_offset_spin.value(),
         )
 
     def _begin_record(self, params: RecordParams) -> None:

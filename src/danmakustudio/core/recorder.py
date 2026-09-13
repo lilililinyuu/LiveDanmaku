@@ -46,6 +46,7 @@ class RecordParams:
     pot_token_script: str = ""              # bgutil-pot 路径，空 = 不传
     record_chat: bool = True                # 同步录制弹幕 JSON（独立进程）
     sync_mode: str = "auto"                 # auto=快速流拷贝；exact=精确同步（重编码）
+    av_offset: float = 0.0                  # 音画补偿秒数：>0 音频延后（录制的文件音频偏快时填正）
     extra_args: list[str] = field(default_factory=list)
 
 
@@ -421,17 +422,20 @@ class RecordSession:
         时间戳基准是直播已进行的秒数，直接改名为 .mp4 会音画不同步、
         进度条异常。失败时保留原文件。
 
-        sync_mode 决定同步方式：
-        - auto：-c copy 仅重封装，秒级完成（直播源时钟偏差会原样保留）
-        - exact：重编码并重新计算时间戳（-c:v libx264 -c:a aac，
-          -vsync cfr），修正累积音画漂移，耗时与视频时长相当
+        - sync_mode：auto=流拷贝秒级重封装；exact=重编码修正累积漂移
+        - av_offset：音画补偿（>0 音频延后）。单文件输入用「同文件双
+          输入」技巧只平移音频流，视频不受影响。
         """
         exact = self.params.sync_mode == "exact"
+        offset = self.params.av_offset
         out = src.with_name(src.stem + ".remux.mp4")
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-fflags", "+genpts", "-i", str(src),
-        ]
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+               "-fflags", "+genpts"]
+        if offset:
+            cmd += ["-i", str(src), "-itsoffset", f"{offset:.3f}", "-i", str(src),
+                    "-map", "0:v:0", "-map", "1:a:0"]
+        else:
+            cmd += ["-i", str(src)]
         if exact:
             cmd += [
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
@@ -472,6 +476,8 @@ class RecordSession:
         out = target / f"{base}.mp4"
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
         for m in media:
+            if m.suffix.lower() == ".m4a" and self.params.av_offset:
+                cmd += ["-itsoffset", f"{self.params.av_offset:.3f}"]
             cmd += ["-i", str(m)]
         cmd += ["-c", "copy", "-movflags", "+faststart", str(out)]
         try:

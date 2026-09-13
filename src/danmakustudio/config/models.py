@@ -194,6 +194,7 @@ class RecorderParams:
     record_chat: bool = True                   # 同步录制弹幕 JSON
     monitor_interval: float = 60.0             # 频道开播探测间隔（秒）
     sync_mode: str = "auto"                    # 音画同步：auto=快速重封装 exact=精确同步（重编码）
+    av_offset: float = 0.0                     # 音画补偿秒数：>0 音频延后（音频偏快时填正）
 
     def __post_init__(self):
         if self.monitor_interval <= 0:
@@ -202,6 +203,8 @@ class RecorderParams:
             raise ValueError("fmt 不能为空字符串")
         if self.sync_mode not in ("auto", "exact"):
             raise ValueError(f"sync_mode 必须是 auto 或 exact，当前 {self.sync_mode}")
+        if abs(self.av_offset) > 30:
+            raise ValueError(f"av_offset 不能超过 ±30 秒，当前 {self.av_offset}")
 
 
 # =============================================================================

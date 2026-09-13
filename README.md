@@ -191,6 +191,7 @@ danmakustudio
 | `record_chat` | true | 同步录制弹幕 JSON |
 | `monitor_interval` | 60.0 | 频道开播探测间隔（秒） |
 | `sync_mode` | auto | 音画同步整理方式：auto=流拷贝重封装（秒级）；exact=精确同步，重编码并重算时间戳（修正累积漂移，整理耗时与录制时长相当） |
+| `av_offset` | 0.0 | 音画补偿秒数：整理时平移音频流（>0 音频延后）。录制的文件音频比视频快 N 秒时填 +N |
 
 ## 配置## 配置
 
