@@ -51,7 +51,6 @@ class RecordParams:
 
 def build_record_command(
     params: RecordParams, *, chat_only: bool = False,
-    live_edge: float | None = None,
 ) -> list[str]:
     """拼装 yt-dlp 命令。
 
@@ -64,12 +63,10 @@ def build_record_command(
             "ffmpeg 不支持 SOCKS 代理，直播录制（HLS）大概率失败；"
             "建议把代理改为 http:// 形式（大多数代理客户端同端口支持 http）"
         )
-    # 直播录制音画对齐：视频/音频是两条独立刷新的 HLS 播放列表，
-    # 直接从"当前边缘"起录会固定差一个分片（约 2 秒，时间基准被
-    # ffmpeg 各自归零后不可见、也无法事后修正）。
-    # 因此总是用 --live-from-start 从同一 DVR 时间点起录；当前位置模式
-    # 的裁剪在停止后按探测到的边缘执行（见 RecordWorker）。
-    cmd.append("--live-from-start")
+    # 勾选「从直播开头录制」时从头录制（音画对齐）；不勾选则从当前
+    # 直播边缘实时录制（服务端两条播放列表按绝对时间对齐，音画同步）
+    if params.live_from_start:
+        cmd.append("--live-from-start")
     if params.proxy:
         cmd += ["--proxy", params.proxy]
     if params.pot_token_script:
@@ -77,11 +74,6 @@ def build_record_command(
             "--extractor-args",
             f"youtubepot-bgutilscript:script_path={params.pot_token_script}",
         ]
-    # 当前位置模式：限定起录点（探测到的直播边缘 + 2s 余量），
-    # 停止后按同一边缘裁剪开头，保证视频/弹幕/内容三者对齐
-    if live_edge is not None:
-        start = max(0, int(live_edge + 2))
-        cmd += ["--download-sections", f"*{start}-inf"]
 
     if chat_only:
         cmd += ["--skip-download", "--write-subs", "--sub-langs", "live_chat"]
@@ -128,45 +120,6 @@ def _safe_size(path: Path) -> int:
         return 0
 
 
-def probe_live_edge(url: str, proxy: str = "") -> float | None:
-    """探测直播流当前边缘相对直播开始的秒数。
-
-    用于「从当前位置开始录制」：HLS 直播的视频/音频播放列表各自独立
-    刷新，直接从边缘起录会固定差一个分片（约 2 秒）；改为 live-from-start
-    + download-sections 从同一 DVR 时间点起录即可对齐。
-    失败（网络/超时/非直播）返回 None。
-    """
-    env = os.environ.copy()
-    if proxy:
-        for key in list(env):
-            if key.lower() in ("http_proxy", "https_proxy", "all_proxy"):
-                del env[key]
-        env["http_proxy"] = proxy
-        env["https_proxy"] = proxy
-        env["no_proxy"] = "127.0.0.1,localhost"
-    cmd = [
-        "ffprobe", "-v", "error", "-show_entries", "stream=start_time",
-        "-of", "csv=p=0", url,
-    ]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=30,
-            env=env, creationflags=_CREATE_NO_WINDOW,
-        )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        logger.warning("探测直播边缘失败: {}", e)
-        return None
-    for line in result.stdout.splitlines():
-        for tok in line.replace(",", " ").split():
-            try:
-                value = float(tok)
-            except ValueError:
-                continue
-            if value > 0:
-                return value
-    return None
-
-
 def normalize_stream_url(url: str) -> str:
     """规整输入 URL：频道主页自动指向 /live 探测页；其余原样使用。"""
     base = url.strip().rstrip("/")
@@ -200,8 +153,6 @@ class RecordSession:
         self.stderr_tail: deque[str] = deque(maxlen=30)
         self._before: set[Path] = set()
         self._started_at: float | None = None
-        self.live_edge: float | None = None   # 当前位置模式探测到的边缘秒数
-        self.start_wall: float | None = None  # 录制启动的墙钟时间（弹幕对齐用）
 
     def start(self, on_output: Callable[[str], None] | None = None) -> None:
         """启动录制进程（视频 + 可选弹幕）。重复调用抛 RuntimeError。"""
@@ -211,44 +162,14 @@ class RecordSession:
         self._before = {p for p in self.params.output_dir.iterdir() if p.is_file()}
         self._started_at = time.time()
 
-        # 从当前位置模式：完整录制（音画对齐），停止后按探测到的边缘裁剪
-        live_edge = None
-        if not self.params.live_from_start:
-            self._log_probe_start(on_output)
-            live_edge = probe_live_edge(self.params.url, self.params.proxy)
-            self.live_edge = live_edge
-            self.start_wall = time.time()
-            if live_edge is not None:
-                if on_output is not None:
-                    on_output(
-                        f"已定位直播边缘（{live_edge:.0f} 秒处）。为保证音画同步，"
-                        "将完整录制并在停止后自动裁掉该位置之前的部分"
-                    )
-            else:
-                if on_output is not None:
-                    on_output(
-                        "探测直播边缘失败，将保留从直播开头的全部内容"
-                        "（无法定位裁剪点）"
-                    )
-
         # 视频录制进程（弹幕与视频同进程互斥，拆分为两个进程并行）
         self.processes.append(
-            self._spawn(
-                build_record_command(self.params, live_edge=live_edge),
-                on_output, "",
-            )
+            self._spawn(build_record_command(self.params), on_output, "")
         )
         if self.params.record_chat:
-            chat_cmd = build_record_command(
-                self.params, chat_only=True, live_edge=live_edge,
-            )
+            chat_cmd = build_record_command(self.params, chat_only=True)
             self.processes.append(self._spawn(chat_cmd, on_output, "[弹幕] "))
         logger.info("已启动 {} 个 yt-dlp 录制进程", len(self.processes))
-
-    @staticmethod
-    def _log_probe_start(on_output) -> None:
-        if on_output is not None:
-            on_output("探测直播边缘…")
 
     def _spawn(
         self,
