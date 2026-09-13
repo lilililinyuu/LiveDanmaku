@@ -187,7 +187,7 @@ danmakustudio
 | `pot_token_script` | D:/youtube-video-download/bgutil-pot.exe | bgutil-pot 路径，经 --extractor-args 传入 |
 | `fmt` | bestvideo+bestaudio/best | 录制格式：优先音视频分离流并在结束时合并，直播无双流时回退单文件 |
 | `output_template` | %(upload_date)s_%(title)s.%(ext)s | 输出文件名模板 |
-| `live_from_start` | true | 从直播开头录制 |
+| `live_from_start` | true | true=从直播开头录制；false=从当前直播位置开始（自动对齐音画，先快速回溯到该位置再继续实时录制） |
 | `record_chat` | true | 同步录制弹幕 JSON |
 | `monitor_interval` | 60.0 | 频道开播探测间隔（秒） |
 | `sync_mode` | auto | 音画同步整理方式：auto=流拷贝重封装（秒级）；exact=精确同步，重编码并重算时间戳（修正累积漂移，整理耗时与录制时长相当） |

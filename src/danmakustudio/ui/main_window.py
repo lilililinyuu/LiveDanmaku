@@ -810,7 +810,9 @@ class DanmakuStudioWindow(QWidget):
         self.record_live_from_start_check = CheckMarkCheckBox("从直播开头录制")
         self.record_live_from_start_check.setChecked(recorder.live_from_start)
         self.record_live_from_start_check.setToolTip(
-            "--live-from-start：从直播开头录制；对不支持回放的直播自动忽略"
+            "勾选=从直播开头录制（含此前全部内容）；"
+            "不勾选=从当前直播位置开始录制（自动对齐音画，"
+            "会先快速回溯到该位置再继续实时录制）"
         )
         opts_row.addWidget(self.record_live_from_start_check)
         self.record_chat_check = CheckMarkCheckBox("同步录制弹幕 JSON")

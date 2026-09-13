@@ -109,7 +109,11 @@ def test_build_record_command_full(tmp_path):
 
 
 def test_build_record_command_minimal(tmp_path):
-    """可选项目关闭时对应参数不应出现。"""
+    """可选项目关闭时对应参数不应出现。
+
+    live_from_start=False 且未探测到边缘时回退为从直播开头
+    （保证音画同步），故 --live-from-start 仍在。
+    """
     cmd = build_record_command(
         _params(
             tmp_path,
@@ -118,14 +122,32 @@ def test_build_record_command_minimal(tmp_path):
             pot_token_script="",
             record_chat=False,
             fmt="best",
-        )
+        ),
+        live_edge=None,
     )
-    assert "--live-from-start" not in cmd
+    assert "--live-from-start" in cmd
+    assert "--download-sections" not in cmd
     assert "--proxy" not in cmd
     assert "--extractor-args" not in cmd
     assert "--write-subs" not in cmd
     # 单文件格式无需合并容器
     assert "--merge-output-format" not in cmd
+
+
+def test_build_record_command_current_position(tmp_path):
+    """当前位置模式：live-from-start + download-sections 从边缘起录，
+    且视频与弹幕命令使用同一起点（音画对齐）。"""
+    params = _params(tmp_path, live_from_start=False, record_chat=True)
+    video_cmd = build_record_command(params, live_edge=5144.0)
+    chat_cmd = build_record_command(params, chat_only=True, live_edge=5144.0)
+
+    for cmd in (video_cmd, chat_cmd):
+        assert "--live-from-start" in cmd
+        idx = cmd.index("--download-sections")
+        assert cmd[idx + 1] == "*5146-inf"   # 边缘 +2s 余量
+
+    # 弹幕命令保留抓取参数，视频命令不含
+    assert "--write-subs" in chat_cmd and "--write-subs" not in video_cmd
 
 
 def test_build_chat_command(tmp_path):

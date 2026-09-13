@@ -50,7 +50,8 @@ class RecordParams:
 
 
 def build_record_command(
-    params: RecordParams, *, chat_only: bool = False
+    params: RecordParams, *, chat_only: bool = False,
+    live_edge: float | None = None,
 ) -> list[str]:
     """拼装 yt-dlp 命令。
 
@@ -63,8 +64,16 @@ def build_record_command(
             "ffmpeg 不支持 SOCKS 代理，直播录制（HLS）大概率失败；"
             "建议把代理改为 http:// 形式（大多数代理客户端同端口支持 http）"
         )
-    if params.live_from_start:
-        cmd.append("--live-from-start")
+    # 直播录制音画对齐：视频/音频是两条独立刷新的 HLS 播放列表，
+    # 直接从"当前边缘"起录会固定差一个分片（约 2 秒）。
+    # 统一用 --live-from-start 从同一 DVR 时间点起录；当前位置模式
+    # （live_from_start=False 且成功探测到边缘）再加 download-sections
+    # 限定起录点，yt-dlp 会快速回溯到该位置后继续实时录制。
+    cmd.append("--live-from-start")
+    live_edge_section = None
+    if live_edge is not None:
+        start = max(0, int(live_edge + 2))   # +2s 余量，越过探测到的边缘
+        live_edge_section = f"*{start}-inf"
     if params.proxy:
         cmd += ["--proxy", params.proxy]
     if params.pot_token_script:
@@ -74,10 +83,14 @@ def build_record_command(
         ]
     if chat_only:
         cmd += ["--skip-download", "--write-subs", "--sub-langs", "live_chat"]
+        if live_edge_section:
+            cmd += ["--download-sections", live_edge_section]
     else:
         cmd += ["-f", params.fmt]
         if "+" in params.fmt:
             cmd += ["--merge-output-format", "mp4"]
+        if live_edge_section:
+            cmd += ["--download-sections", live_edge_section]
     cmd += ["-o", str(params.output_dir / params.output_template)]
     cmd += [str(arg) for arg in params.extra_args]
     cmd.append(params.url)
@@ -96,6 +109,45 @@ def _safe_size(path: Path) -> int:
         return path.stat().st_size
     except OSError:
         return 0
+
+
+def probe_live_edge(url: str, proxy: str = "") -> float | None:
+    """探测直播流当前边缘相对直播开始的秒数。
+
+    用于「从当前位置开始录制」：HLS 直播的视频/音频播放列表各自独立
+    刷新，直接从边缘起录会固定差一个分片（约 2 秒）；改为 live-from-start
+    + download-sections 从同一 DVR 时间点起录即可对齐。
+    失败（网络/超时/非直播）返回 None。
+    """
+    env = os.environ.copy()
+    if proxy:
+        for key in list(env):
+            if key.lower() in ("http_proxy", "https_proxy", "all_proxy"):
+                del env[key]
+        env["http_proxy"] = proxy
+        env["https_proxy"] = proxy
+        env["no_proxy"] = "127.0.0.1,localhost"
+    cmd = [
+        "ffprobe", "-v", "error", "-show_entries", "stream=start_time",
+        "-of", "csv=p=0", url,
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False, timeout=30,
+            env=env, creationflags=_CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logger.warning("探测直播边缘失败: {}", e)
+        return None
+    for line in result.stdout.splitlines():
+        for tok in line.replace(",", " ").split():
+            try:
+                value = float(tok)
+            except ValueError:
+                continue
+            if value > 0:
+                return value
+    return None
 
 
 def normalize_stream_url(url: str) -> str:
@@ -148,6 +200,11 @@ class RecordSession:
             chat_cmd = build_record_command(self.params, chat_only=True)
             self.processes.append(self._spawn(chat_cmd, on_output, "[弹幕] "))
         logger.info("已启动 {} 个 yt-dlp 录制进程", len(self.processes))
+
+    @staticmethod
+    def _log_probe_start(on_output) -> None:
+        if on_output is not None:
+            on_output("探测直播边缘…")
 
     def _spawn(
         self,
