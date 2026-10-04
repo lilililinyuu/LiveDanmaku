@@ -66,7 +66,13 @@ from ._shared import (
 from .file_picker import FileFolderPickerDialog
 from .style_panel import StylePanel
 from .theme import CheckMarkCheckBox, refresh_dynamic_style
-from .worker import BatchWorker, DownloadWorker, MonitorWorker, RecordWorker
+from .worker import (
+    BatchWorker,
+    DownloadWorker,
+    MonitorWorker,
+    RecordWorker,
+    get_gui_log_bridge,
+)
 
 # 参照选择对话框展示的最大条数（与 pipeline 工作台保持一致）
 _TRIM_REF_WINDOW = 50
@@ -262,6 +268,9 @@ class DanmakuStudioWindow(QWidget):
         self.download_worker: DownloadWorker | None = None
         self.record_worker = None
         self.monitor_worker = None
+        # 应用级日志桥：批次/下载/录制的全局日志（loguru→sys.stderr）
+        # 都经由它与界面同寿命的信号源进入日志面板
+        get_gui_log_bridge().log.connect(self.append_log)
         self._record_started_at = 0.0
         self.pending_jobs: list[BatchJob] = []
         self.sidebar_collapsed = False

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
 from loguru import logger
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..batch import BatchJob
 from ..config.loader import load_config
@@ -35,14 +36,46 @@ class QtLogStream:
 
         for line in text.replace("\r", "\n").splitlines():
             cleaned = ANSI_ESCAPE_RE.sub("", line).strip()
-            if cleaned:
+            if not cleaned:
+                continue
+            try:
                 self.log_signal.emit(cleaned)
+            except RuntimeError:
+                # 信号源 QObject 已销毁（界面关闭/worker 被替换）：
+                # 丢弃残余日志，避免 loguru 每条都打 Logging error
+                pass
 
     def flush(self) -> None:
         pass
 
     def isatty(self) -> bool:
         return False
+
+
+class GuiLogBridge(QObject):
+    """应用生命周期的日志桥。
+
+    configure_logger 会把"当时的 sys.stderr"对象捕获为 loguru 的
+    stderr sink。若绑定到某个 worker 的信号，worker 被替换或销毁后
+    sink 仍持有已删除的 Qt 信号源，之后所有日志（下载/录制的
+    pipeline 日志）都会抛 RuntimeError 并断流。绑定到与界面同寿命
+    的桥对象可避免。
+    """
+
+    log = Signal(str)
+
+
+_bridge_lock = threading.Lock()
+_gui_log_bridge: GuiLogBridge | None = None
+
+
+def get_gui_log_bridge() -> GuiLogBridge:
+    """返回全局唯一的日志桥（与主界面同寿命）。"""
+    global _gui_log_bridge
+    with _bridge_lock:
+        if _gui_log_bridge is None:
+            _gui_log_bridge = GuiLogBridge()
+        return _gui_log_bridge
 
 
 class BatchWorker(QThread):
@@ -84,7 +117,10 @@ class BatchWorker(QThread):
     def run(self) -> None:
         old_stdout = sys.stdout
         old_stderr = sys.stderr
-        stream = QtLogStream(self.log)
+        # 绑定到应用级日志桥而非 self.log：worker 对象会被后续任务替换
+        # 销毁，而 loguru 的 stderr sink 在 configure_logger 时捕获该
+        # stream，绑定到桥可保证 sink 永远持有存活对象
+        stream = QtLogStream(get_gui_log_bridge().log)
         sys.stdout = stream
         sys.stderr = stream
 

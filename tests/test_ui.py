@@ -789,3 +789,51 @@ def test_trim_reference_dialog_default_is_50(qapp):
     from danmakustudio.ui.main_window import _TRIM_REF_WINDOW
 
     assert _TRIM_REF_WINDOW == 50
+
+
+# =============================================================================
+# 全局日志桥与 QtLogStream
+# =============================================================================
+
+
+def test_gui_log_bridge_is_singleton():
+    """日志桥全局唯一，与界面同寿命。"""
+    from danmakustudio.ui.worker import get_gui_log_bridge
+
+    assert get_gui_log_bridge() is get_gui_log_bridge()
+
+
+def test_qt_log_stream_emits_to_signal(qapp):
+    from PySide6.QtCore import QObject, Signal
+
+    from danmakustudio.ui.worker import QtLogStream
+
+    class _Sink(QObject):
+        got = Signal(str)
+
+    sink = _Sink()
+    lines: list[str] = []
+    sink.got.connect(lines.append)
+
+    stream = QtLogStream(sink.got)
+    stream.write("第一行\n\x1b[31m红字\x1b[0m\r\n")
+    assert lines == ["第一行", "红字"]
+
+
+def test_qt_log_stream_survives_deleted_signal_source(qapp):
+    """信号源 QObject 被销毁后 write 应静默丢弃，不再抛
+    RuntimeError（loguru stderr sink 持有旧流时的 Logging error）。"""
+    from PySide6.QtCore import QObject, Signal
+
+    from danmakustudio.ui.worker import QtLogStream
+
+    class _Sink(QObject):
+        got = Signal(str)
+
+    sink = _Sink()
+    stream = QtLogStream(sink.got)
+    del sink
+    import gc
+
+    gc.collect()
+    stream.write("迟到的一行\n")  # 不应抛异常
