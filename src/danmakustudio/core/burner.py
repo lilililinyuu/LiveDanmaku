@@ -91,6 +91,7 @@ class DanmakuBurner:
         self.xml_in = xml_in
         self.subtitle_in = xml_in
         self._config = config
+        self._encode_mode = encode_mode
         self._progress_callback = progress_callback
         self._clip = clip
         if drop_first < 0:
