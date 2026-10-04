@@ -36,6 +36,8 @@ src.bak/
 /*.xml
 /chat.json
 /*.live_chat.json
+/直播录制/
+/out/
 /*.ytdl
 /*.part-Frag*
 /*.part

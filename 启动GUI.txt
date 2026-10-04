@@ -2,31 +2,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run_gui.ps1 -python "C:\Us
 
 -global_quality32 -preset faster -c:a copy
 
-问题：弹幕从右边出来的位置需改为视频的最右端；图形化界面优化；压制算法优化。
-会员和普通用户要能分开单独调整样式
-对文本能调整的属性要有：
-字体颜色、字体大小、字体类型、文本不透明度（包括描边）、文本描边厚度、文本描边颜色、文本阴影颜色、文本阴影不透明度
-对表情：
-单独能调整
-不透明度、大小、间距
+ffmpeg烧录ass字幕视频命令：
 
-新需求：
-识别youtube平台自带的表情并转换为图片显示（不需要存到assets/emoji/目录下）；
-调整第一条弹幕出现时间（视频开始播放后多久开始出现弹幕）；
-弹幕从右边出来的位置不是视频的最右端边缘（如何调节）
+ffmpeg -i input.mp4 -vf "ass=subtitle.ass" -c:v libx264 -crf 23 -preset medium -c:a copy output.mp4
 
-
-新新需求：
-只用命令行工作，去除图形化界面；
-能够提供ffmepg自定义压缩参数；
-集成“yt-dlp导出直播回放视频+对应的弹幕json文件” -> “json转xml” -> “配置弹幕渲染参数” -> “生成预览图” -> “ffmepg自定义压缩参数” -> “测试压缩1min片段，确认效果” -> “测试效果没问题，开始对完整视频进行压缩”整个过程的完整操作。
-
-2026.8.27需求
-1.将预览图的文字更改成日文
-2.“yt-dlp导出直播回放视频+对应的弹幕json文件（分成两步，分别询问）” -> “json转xml” -> “配置弹幕渲染参数” -> “生成预览图” -> “ffmepg自定义压缩参数” -> “测试压缩1min片段，确认效果” -> “测试效果没问题，开始对完整视频进行压缩”整个过程里的任一一步都可以选择跳过，且一定时间内在控制台打印出进度（30s）
-3.pipeline加上 自定义删除最开始几条（在直播开始前发的）弹幕，再手动将直播开始后发的第一条弹幕的时间与视频时间对齐,
-
-
-2026.9.5
-去除命令行工作功能，只保留图形化界面
-增加功能：根据最初的弹幕json文件时间戳，分析直播高潮点（弹幕发送频率高）
+源视频720P：
+ffmpeg -i input.mp4 -vf "scale=3840:2160:flags=lanczos,ass=subtitle.ass,scale=1920:1080:flags=lanczos" -c:v libx264 -crf 23 -preset medium -c:a copy output_1080p.mp4
