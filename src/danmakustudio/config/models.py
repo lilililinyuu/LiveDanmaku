@@ -146,12 +146,18 @@ class EncodeParams:
     gpu_cq: int = 15
     qsv_preset: str = "slow"
     qsv_quality: int = 18
+    # QSV 会话绑定的显卡 PCI vendor id：多适配器机器（IddCx 虚拟显示适配器 +
+    # 真实显卡）上 oneVPL 自动选择的适配器不稳定，按 vendor id 钉定真实
+    # Intel 显卡；0 表示不指定（走自动选择）。
+    qsv_vendor_id: int = 0x8086
     cpu_preset: str = "medium"
     cpu_crf: int = 18
     cpu_min_reserve_threads: int = 2
     extra_args: list[str] = field(default_factory=list)  # 追加到 ffmpeg 命令末尾的自定义参数
 
     def __post_init__(self):
+        if self.qsv_vendor_id < 0:
+            raise ValueError(f"qsv_vendor_id 不能为负数，当前 {self.qsv_vendor_id}")
         for name in ("gpu_cq", "qsv_quality", "cpu_crf"):
             v = getattr(self, name)
             if not (0 <= v <= 51):

@@ -271,6 +271,7 @@ EXE 运行时，图形界面会优先使用 exe 同目录下的 `danmakustudio.y
 | `gpu_cq`                  | 15       | NVIDIA NVENC QP 质量（0~51，越小越好、文件越大） |
 | `qsv_preset`              | "slow"   | Intel QSV 预设（越慢通常质量越好）             |
 | `qsv_quality`             | 18       | Intel QSV 质量（0~51，越小越好、文件越大）       |
+| `qsv_vendor_id`           | 0x8086   | QSV 绑定的显卡 PCI vendor id；多适配器机器（虚拟显示适配器 + 真实显卡）上把 QSV 会话钉定到真实 Intel 显卡，避免会话落在虚拟适配器上停转；0 = 走 ffmpeg 自动选择 |
 | `cpu_preset`              | "medium" | libx264 预设（越慢压缩效率越好）               |
 | `cpu_crf`                 | 18       | libx264 CRF 质量（0~51，越小越好、文件越大）     |
 | `cpu_min_reserve_threads` | 2        | CPU 编码保留线程数                        |

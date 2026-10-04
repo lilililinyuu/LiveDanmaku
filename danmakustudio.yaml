@@ -35,6 +35,11 @@ encode:
   gpu_cq: 15
   qsv_preset: slow
   qsv_quality: 18
+  # QSV 编码绑定的显卡 PCI vendor id（0x8086=Intel）。
+  # 多适配器机器（虚拟显示适配器 + 真实显卡）上用于把 QSV 会话
+  # 钉定到真实 Intel 显卡，避免会话落在虚拟适配器上导致停转；
+  # 设为 0 走 ffmpeg 自动选择。
+  qsv_vendor_id: 0x8086
   cpu_preset: medium
   cpu_crf: 18
   cpu_min_reserve_threads: 2

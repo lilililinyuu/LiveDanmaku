@@ -87,6 +87,80 @@ def test_qsv_command_keeps_software_overlay_before_qsv_encode():
     assert "format=nv12[out]" in joined
 
 
+def test_qsv_command_pins_intel_adapter_by_default():
+    """QSV 会话默认钉定真实 Intel 适配器：d3d11va 按 vendor_id 枚举，
+    再以其为子设备创建 qsv 设备；设备参数是全局选项，须在首个 -i 之前。"""
+    manager = _make_manager(EncodeMode.QSV)
+    cmd = manager.build_command(30.0, 1920, 1080, _layer_params(), in_ss=5.0, in_t=60.0)
+    joined = " ".join(cmd)
+
+    assert "d3d11va=qsv_parent:,vendor_id=0x8086" in joined
+    assert "qsv=qsv@qsv_parent" in joined
+    assert cmd.index("-init_hw_device") < cmd.index("-ss") < cmd.index("-i")
+
+
+@pytest.mark.parametrize("mode", [EncodeMode.CPU, EncodeMode.GPU, EncodeMode.QSV])
+def test_all_pipelines_emit_progress_to_stderr(mode):
+    """编码进度必须经 -progress pipe:2 汇报（背压与停转检测依赖它），
+    -nostats 压掉普通统计行，避免污染错误诊断尾部。回归防护：
+    漏加该标志时 encoded_frames 恒为 0，水位一到必触发假性停转。"""
+    manager = _make_manager(mode)
+    cmd = manager.build_command(30.0, 1920, 1080, _layer_params())
+
+    assert cmd[cmd.index("-progress") + 1] == "pipe:2"
+    assert "-nostats" in cmd
+
+
+def test_qsv_command_without_vendor_id_keeps_auto_selection():
+    """qsv_vendor_id=0 时不注入设备参数，走 ffmpeg 自动选择。"""
+    manager = _make_manager(EncodeMode.QSV)
+    manager.encode_params = EncodeParams(qsv_vendor_id=0)
+    cmd = manager.build_command(30.0, 1920, 1080, _layer_params())
+
+    assert "-init_hw_device" not in cmd
+
+
+def test_qsv_check_probes_pinned_device_path(monkeypatch):
+    """QSV 可用性探测与真实压制使用同样的钉定设备参数。"""
+    manager = _make_manager(EncodeMode.QSV)
+    calls: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = " V....D h264_qsv  NVIDIA/Intel Quick Sync H.264 (codec h264)"
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return FakeCompleted()
+
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
+    assert manager._check_qsv_available() is True
+
+    probe = calls[-1]
+    joined = " ".join(probe)
+    assert "d3d11va=qsv_parent:,vendor_id=0x8086" in joined
+    assert "qsv=qsv@qsv_parent" in joined
+
+
+def test_qsv_check_fails_when_pinned_init_fails(monkeypatch):
+    """钉定设备初始化失败时 QSV 视为不可用（AUTO 模式回退 CPU）。"""
+    manager = _make_manager(EncodeMode.QSV)
+
+    class FakeEncoders:
+        returncode = 0
+        stdout = " V....D h264_qsv  (codec h264)"
+
+    class FakeFailed:
+        returncode = 1
+        stdout = ""
+
+    def fake_run(cmd, **kwargs):
+        return FakeEncoders() if "-encoders" in cmd else FakeFailed()
+
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
+    assert manager._check_qsv_available() is False
+
+
 def test_get_video_info_handles_na_nb_frames(monkeypatch):
     manager = _make_manager()
     run_kwargs = {}

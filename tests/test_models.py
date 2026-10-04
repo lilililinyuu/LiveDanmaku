@@ -10,6 +10,7 @@ from danmakustudio.config import DEFAULT_CONFIG
 from danmakustudio.config.models import (
     AnimationParams,
     EmojiStyle,
+    EncodeParams,
     LayoutStyle,
     StyleOverrides,
     TextStyle,
@@ -513,6 +514,14 @@ def test_animation_first_danmaku_at_validation():
     assert AnimationParams(first_danmaku_at=0.0).first_danmaku_at == 0.0
     with pytest.raises(ValueError):
         AnimationParams(first_danmaku_at=-1.0)
+
+
+def test_encode_qsv_vendor_id_default_and_validation():
+    """qsv_vendor_id 默认钉定 Intel (0x8086)，负数应报错。"""
+    assert EncodeParams().qsv_vendor_id == 0x8086
+    assert EncodeParams(qsv_vendor_id=0).qsv_vendor_id == 0
+    with pytest.raises(ValueError):
+        EncodeParams(qsv_vendor_id=-1)
 
 
 # =============================================================================

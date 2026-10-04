@@ -65,7 +65,7 @@ class FFmpegManager:
             if not self._check_qsv_available():
                 raise RuntimeError("未检测到 QSV 编码器")
             self.active_pipeline = EncodeMode.QSV
-            logger.info("编码模式: QSV")
+            logger.info(f"编码模式: QSV{self._qsv_bind_desc()}")
             return
 
         if self._check_nvenc_available():
@@ -75,7 +75,7 @@ class FFmpegManager:
 
         if self._check_qsv_available():
             self.active_pipeline = EncodeMode.QSV
-            logger.info("编码模式: QSV — 自动回退")
+            logger.info(f"编码模式: QSV — 自动回退{self._qsv_bind_desc()}")
             return
 
         self.active_pipeline = EncodeMode.CPU
@@ -109,9 +109,36 @@ class FFmpegManager:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
-    @staticmethod
-    def _check_qsv_available() -> bool:
-        """检查 QSV 是否可用"""
+    def _qsv_device_args(self) -> list[str]:
+        """把 QSV 会话钉定到真实 Intel 显卡的设备参数。
+
+        多适配器机器（IddCx 虚拟显示适配器 + 真实显卡）上 oneVPL 分发器
+        自动选择的适配器不稳定，会话可能落在虚拟适配器上导致编码器
+        停转。先用 d3d11va 设备按 PCI vendor id 枚举出真实 Intel 适配器，
+        再把它作为子设备创建 QSV 会话，编码器即绑定该显卡。
+        qsv_vendor_id=0 时返回空列表（走 oneVPL 自动选择）。
+        """
+        vendor = self.encode_params.qsv_vendor_id
+        if not vendor:
+            return []
+        return [
+            "-init_hw_device", f"d3d11va=qsv_parent:,vendor_id=0x{vendor:x}",
+            "-init_hw_device", "qsv=qsv@qsv_parent",
+        ]
+
+    def _qsv_bind_desc(self) -> str:
+        """日志里描述 QSV 绑定方式。"""
+        vendor = self.encode_params.qsv_vendor_id
+        if not vendor:
+            return "（未指定显卡，走自动选择）"
+        return f"（绑定 PCI vendor 0x{vendor:x} 的 Intel 显卡）"
+
+    def _check_qsv_available(self) -> bool:
+        """检查 QSV 是否可用（含钉定 Intel 适配器的完整初始化路径）。
+
+        探测命令与真实压制命令使用同样的设备参数：钉定失败时视为
+        QSV 不可用，AUTO 模式自然回退 CPU，避免运行期才失败。
+        """
         try:
             result = subprocess.run(
                 ["ffmpeg", "-hide_banner", "-encoders"],
@@ -127,6 +154,7 @@ class FFmpegManager:
             result = subprocess.run(
                 [
                     "ffmpeg", "-y", "-hide_banner",
+                    *self._qsv_device_args(),
                     "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
                     "-c:v", "h264_qsv", "-f", "null", "-",
                 ],
@@ -269,7 +297,7 @@ class FFmpegManager:
         )
         canvas_w = round(lp.layer_w * render_scale)
         canvas_h = round(lp.layer_h * render_scale)
-        cmd = ["ffmpeg", "-y"]
+        cmd = ["ffmpeg", "-y", "-nostats", "-progress", "pipe:2"]
         if in_ss > 0:
             cmd += ["-ss", str(in_ss)]
         cmd += ["-i", self.video_in]
@@ -312,7 +340,9 @@ class FFmpegManager:
         )
         canvas_w = round(lp.layer_w * render_scale)
         canvas_h = round(lp.layer_h * render_scale)
-        cmd = ["ffmpeg", "-y"]
+        # -init_hw_device 是全局选项：把 QSV 会话钉定到真实 Intel 适配器，
+        # 避免 oneVPL 自动选择落在 IddCx 虚拟适配器上导致会话停转
+        cmd = ["ffmpeg", "-y", "-nostats", "-progress", "pipe:2", *self._qsv_device_args()]
         if in_ss > 0:
             cmd += ["-ss", str(in_ss)]
         cmd += ["-i", self.video_in]
@@ -356,7 +386,7 @@ class FFmpegManager:
         )
         canvas_w = round(lp.layer_w * render_scale)
         canvas_h = round(lp.layer_h * render_scale)
-        cmd = ["ffmpeg", "-y"]
+        cmd = ["ffmpeg", "-y", "-nostats", "-progress", "pipe:2"]
         if in_ss > 0:
             cmd += ["-ss", str(in_ss)]
         cmd += ["-i", self.video_in]
