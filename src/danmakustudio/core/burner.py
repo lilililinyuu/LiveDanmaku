@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from ..config.models import DEFAULT_CONFIG, EncodeMode
 from ..encode.ffmpeg import FFmpegManager
-from ..errors import DanmakuStudioError, EncodeError, InputError
+from ..errors import DanmakuStudioError, EncodeError, EncoderStalledError, InputError
 from ..input.parser import (
     align_first_event_time,
     drop_first_events,
@@ -112,6 +112,21 @@ class DanmakuBurner:
         self._frame_encoder = FFmpegManager(video_in, self.video_out, encode_mode, self._config.encode, self._config.system)
 
     def run(self):
+        """执行压制；QSV 等硬件编码器停转时自动改用 CPU 重试一次。"""
+        try:
+            self._run_once()
+        except EncoderStalledError as e:
+            if self._encode_mode == EncodeMode.CPU:
+                raise
+            logger.warning(f"{e}；自动改用 CPU 编码重试")
+            self._encode_mode = EncodeMode.CPU
+            self._frame_encoder = FFmpegManager(
+                self.video_in, self.video_out, EncodeMode.CPU,
+                self._config.encode, self._config.system,
+            )
+            self._run_once()
+
+    def _run_once(self):
         cfg = self._config
         style = cfg.style
         syscfg = cfg.system
@@ -277,30 +292,39 @@ class DanmakuBurner:
         high_watermark = int(fps * 4)
         low_watermark = int(fps * 1)
         stall_state = [0, monotonic()]
+        pausing = [False]
 
         try:
-            for frame_idx in range(start_frame, end_frame):
+            frame_idx = start_frame
+            while frame_idx < end_frame:
                 current_time = frame_idx / fps
                 dt = 1.0 / fps
 
                 encoded = frame_encoder.encoded_frames
                 backlog = (frame_idx - start_frame + 1) - encoded
-                if backlog > high_watermark:
+                if backlog > high_watermark or (pausing[0] and backlog > low_watermark):
                     if encoded != stall_state[0]:
                         stall_state[0] = encoded
                         stall_state[1] = monotonic()
                     elif monotonic() - stall_state[1] > 60.0:
-                        raise EncodeError(
-                            "编码器 60 秒无进展（无法消费帧），已中止压制；"
-                            "建议改用 CPU 编码模式"
+                        raise EncoderStalledError(
+                            "编码器 60 秒无进展（无法消费帧），已中止压制"
                         )
-                    # 高水位之上暂停渲染（等待消费），回落到低水位再继续
+                    if not pausing[0]:
+                        pausing[0] = True
+                        logger.info(
+                            "渲染快于编码速度，已自动节流"
+                            "（进度以实际编码完成帧数为准）"
+                        )
+                    # 节流期间按编码完成帧数刷新进度，让界面持续可见
+                    report_progress(min(encoded, seg_frames))
+                    pbar.n = min(encoded, seg_frames)
+                    pbar.refresh()
                     time.sleep(0.02)
-                    continue
-                if backlog <= low_watermark and stall_state[0]:
-                    # 已回落到低水位，复位停滞计时（下次再触高水位重新计时）
-                    stall_state[0] = 0
-                    stall_state[1] = monotonic()
+                    continue   # 原地等待同一帧（不丢帧）
+                if pausing[0]:
+                    pausing[0] = False
+                    logger.info("积压已消化，恢复正常渲染速度")
 
                 text_emitted = LayoutEngine.spawn_new_danmakus(
                     layout_ctx, current_time, danmaku_pool, active_text,
@@ -322,6 +346,7 @@ class DanmakuBurner:
 
                 self._encode_frame(frame_encoder, renderer, pbar, frame_idx, seg_frames)
                 report_progress(frame_idx - start_frame + 1)
+                frame_idx += 1
         finally:
             renderer.end()
             pbar.close()

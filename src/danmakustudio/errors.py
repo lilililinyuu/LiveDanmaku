@@ -83,6 +83,10 @@ class EncodeError(DanmakuStudioError):
         super().__init__(message, category=ErrorCategory.ENCODE, context=context)
 
 
+class EncoderStalledError(EncodeError):
+    """编码器停转（长时间无法消费帧），需要更换编码方式重试"""
+
+
 class ResourceError(DanmakuStudioError):
     """资源错误"""
     def __init__(self, message: str, context: ErrorContext | None = None):
