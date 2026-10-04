@@ -288,9 +288,11 @@ class DanmakuBurner:
 
         # 背压：产出快于编码消费时暂停渲染。ffmpeg 的帧队列无界，
         # 无节流时 1080p60 约 32 秒即可耗尽系统内存（实测整机崩溃）。
-        # 高水位 4 秒、低水位 1 秒（按输出帧计）；编码器 60 秒无进展则中止。
+        # 高水位 4 秒、低水位 1 秒（按输出帧计）；编码器 20 秒零进展
+        # 视为停转（正常编码器每 0.5 秒即有进度汇报）。
         high_watermark = int(fps * 4)
         low_watermark = int(fps * 1)
+        stall_timeout = 20.0
         stall_state = [0, monotonic()]
         pausing = [False]
 
@@ -306,9 +308,10 @@ class DanmakuBurner:
                     if encoded != stall_state[0]:
                         stall_state[0] = encoded
                         stall_state[1] = monotonic()
-                    elif monotonic() - stall_state[1] > 60.0:
+                    elif monotonic() - stall_state[1] > stall_timeout:
                         raise EncoderStalledError(
-                            "编码器 60 秒无进展（无法消费帧），已中止压制"
+                            "编码器 20 秒无进展（无法消费帧），已中止压制；"
+                            "将自动改用 CPU 编码重试"
                         )
                     if not pausing[0]:
                         pausing[0] = True
