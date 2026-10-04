@@ -444,7 +444,10 @@ class RecordSession:
             ]
         else:
             cmd += ["-c", "copy"]
-        cmd += ["-movflags", "+faststart", "-f", "mp4", str(out)]
+        # 音频流被截断时，ffmpeg 7.x muxer 的交错队列会停止排出视频包
+        # 无界堆积，压窄窗口强制排空
+        cmd += ["-max_interleave_delta", "1000000",
+                "-movflags", "+faststart", "-f", "mp4", str(out)]
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, check=False,
@@ -479,7 +482,10 @@ class RecordSession:
             if m.suffix.lower() == ".m4a" and self.params.av_offset:
                 cmd += ["-itsoffset", f"{self.params.av_offset:.3f}"]
             cmd += ["-i", str(m)]
-        cmd += ["-c", "copy", "-movflags", "+faststart", str(out)]
+        cmd += ["-c", "copy",
+                # 同 _remux_to_mp4：防音频流截断时 muxer 交错队列无界堆积
+                "-max_interleave_delta", "1000000",
+                "-movflags", "+faststart", str(out)]
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, check=False,

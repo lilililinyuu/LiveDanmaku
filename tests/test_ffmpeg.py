@@ -111,6 +111,18 @@ def test_all_pipelines_emit_progress_to_stderr(mode):
     assert "-nostats" in cmd
 
 
+@pytest.mark.parametrize("mode", [EncodeMode.CPU, EncodeMode.GPU, EncodeMode.QSV])
+def test_all_pipelines_bound_muxer_interleave_queue(mode):
+    """音频流截断（直播录像常见）时，ffmpeg 7.x muxer 的交错队列会
+    停止排出视频包并无界堆积（实测 2 分钟 40+GB）；必须压窄交错窗口。"""
+    manager = _make_manager(mode)
+    cmd = manager.build_command(30.0, 1920, 1080, _layer_params())
+
+    i = cmd.index("-max_interleave_delta")
+    assert cmd[i + 1] == "1000000"
+    assert cmd[-1] == "output.mp4"
+
+
 def test_qsv_command_without_vendor_id_keeps_auto_selection():
     """qsv_vendor_id=0 时不注入设备参数，走 ffmpeg 自动选择。"""
     manager = _make_manager(EncodeMode.QSV)

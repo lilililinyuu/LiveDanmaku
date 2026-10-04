@@ -285,6 +285,15 @@ class FFmpegManager:
         """用户自定义的 ffmpeg 参数（追加在输出文件之前）。"""
         return [str(arg) for arg in self.encode_params.extra_args]
 
+    def _mux_args(self) -> list[str]:
+        """输出侧 muxer 参数：把交错窗口压缩到 1 秒。
+
+        直播录像的音频流常比视频短（录制中断/分片）。音频流中途 EOF
+        后，ffmpeg 7.x 线程化 muxer 的交错队列会停止排出视频包，实测
+        2 分钟内堆积 40+GB；压窄窗口可强制其持续排空。
+        """
+        return ["-max_interleave_delta", "1000000"]
+
     def _build_gpu_command(
         self, fps: float, w: int, h: int, lp: LayerParams,
         in_ss: float = 0.0, in_t: float | None = None,
@@ -324,6 +333,7 @@ class FFmpegManager:
             "-rc:v", "constqp",
             "-qp", str(self.encode_params.gpu_cq),
             "-c:a", "copy",
+            *self._mux_args(),
             *self._extra_args(),
             self.video_out,
         ]
@@ -367,6 +377,7 @@ class FFmpegManager:
             "-pix_fmt", "nv12",
             "-global_quality", str(self.encode_params.qsv_quality),
             "-c:a", "copy",
+            *self._mux_args(),
             *self._extra_args(),
             self.video_out,
         ]
@@ -412,6 +423,7 @@ class FFmpegManager:
             "-crf", str(self.encode_params.cpu_crf),
             "-threads", str(encode_threads),
             "-c:a", "copy",
+            *self._mux_args(),
             *self._extra_args(),
             self.video_out,
         ]
