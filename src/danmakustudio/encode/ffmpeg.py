@@ -43,6 +43,7 @@ class FFmpegManager:
         self.process: subprocess.Popen | None = None
         self.stderr_thread: threading.Thread | None = None
         self.stderr_tail: deque[str] = deque(maxlen=20)
+        self.encoded_frames = 0   # 编码器已完成的帧数（-progress 解析，供背压）
 
         self._resolve_encode_mode()
 
@@ -402,12 +403,27 @@ class FFmpegManager:
             for line in self.process.stderr:
                 line_str = line.decode("utf-8", errors="replace").rstrip("\n\r")
                 if line_str:
-                    self.stderr_tail.append(line_str)
+                    frame = self._parse_progress_frame(line_str)
+                    if frame is not None:
+                        # 进度行只更新计数，不占用错误诊断的尾部缓冲
+                        self.encoded_frames = frame
+                    else:
+                        self.stderr_tail.append(line_str)
                     logger.debug(line_str)
 
         self.stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
         self.stderr_thread.start()
         logger.debug("FFmpeg 进程已启动")
+
+    @staticmethod
+    def _parse_progress_frame(line: str) -> int | None:
+        """从 -progress 输出行解析已编码帧数（frame=123），非进度行返回 None。"""
+        if not line.startswith("frame="):
+            return None
+        try:
+            return int(line[6:])
+        except ValueError:
+            return None
 
     def _health_check(self) -> bool:
         """检查 FFmpeg 进程是否存活"""

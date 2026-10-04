@@ -162,3 +162,55 @@ def test_cleanup_raises_when_ffmpeg_returns_nonzero():
         manager.cleanup()
 
     assert manager.process is None
+
+
+def test_parse_progress_frame():
+    """-progress 输出行解析：frame=N 提取帧数，其余行返回 None。"""
+    from danmakustudio.encode.ffmpeg import FFmpegManager
+
+    assert FFmpegManager._parse_progress_frame("frame=123") == 123
+    assert FFmpegManager._parse_progress_frame("frame=0") == 0
+    assert FFmpegManager._parse_progress_frame("fps=42") is None
+    assert FFmpegManager._parse_progress_frame("bitrate=N/A") is None
+    assert FFmpegManager._parse_progress_frame("frame=N/A") is None
+    assert FFmpegManager._parse_progress_frame("progress=continue") is None
+
+
+def test_progress_updates_encoded_frames(monkeypatch):
+    """stderr 进度行（-progress pipe:2）应更新 encoded_frames。"""
+
+    from danmakustudio.encode.ffmpeg import FFmpegManager
+
+    class _FakeStream:
+        def __init__(self, text):
+            self._text = text
+
+        def __iter__(self):
+            # _read_stderr 会对每行做 .decode()，这里产出 bytes 行
+            return iter(self._text.encode().splitlines(keepends=True))
+
+        def read(self, n=-1):
+            t, self._text = self._text, ""
+            return t
+
+    class _FakeProc:
+        def __init__(self):
+            # -progress pipe:2 的进度行走 stderr
+            self.stdout = _FakeStream("")
+            self.stderr = _FakeStream("frame=10\nframe=42\n")
+            self.pid = 0
+
+    mgr = FFmpegManager("in.mp4", "out.mp4")
+    monkeypatch.setattr(
+        "danmakustudio.encode.ffmpeg.subprocess.Popen",
+        lambda cmd, **kw: _FakeProc(),
+    )
+
+    mgr.start(["ffmpeg", "-version"])
+    import time
+
+    deadline = time.monotonic() + 5
+    while mgr.encoded_frames < 42 and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    assert mgr.encoded_frames == 42

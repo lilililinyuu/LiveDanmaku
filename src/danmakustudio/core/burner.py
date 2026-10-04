@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
-from time import perf_counter
+from time import monotonic, perf_counter
 
 from loguru import logger
 from tqdm import tqdm
@@ -270,10 +271,36 @@ class DanmakuBurner:
             logger.info(f"进度: {percent:5.1f}% ({done_frames}/{seg_frames} 帧), 速度 {speed:.1f} 帧/s, 已用 {_format_duration(elapsed)}, 剩余 {_format_duration(remaining)}")
             last_log_at = now
 
+        # 背压：产出快于编码消费时暂停渲染。ffmpeg 的帧队列无界，
+        # 无节流时 1080p60 约 32 秒即可耗尽系统内存（实测整机崩溃）。
+        # 高水位 4 秒、低水位 1 秒（按输出帧计）；编码器 60 秒无进展则中止。
+        high_watermark = int(fps * 4)
+        low_watermark = int(fps * 1)
+        stall_state = [0, monotonic()]
+
         try:
             for frame_idx in range(start_frame, end_frame):
                 current_time = frame_idx / fps
                 dt = 1.0 / fps
+
+                encoded = frame_encoder.encoded_frames
+                backlog = (frame_idx - start_frame + 1) - encoded
+                if backlog > high_watermark:
+                    if encoded != stall_state[0]:
+                        stall_state[0] = encoded
+                        stall_state[1] = monotonic()
+                    elif monotonic() - stall_state[1] > 60.0:
+                        raise EncodeError(
+                            "编码器 60 秒无进展（无法消费帧），已中止压制；"
+                            "建议改用 CPU 编码模式"
+                        )
+                    # 高水位之上暂停渲染（等待消费），回落到低水位再继续
+                    time.sleep(0.02)
+                    continue
+                if backlog <= low_watermark and stall_state[0]:
+                    # 已回落到低水位，复位停滞计时（下次再触高水位重新计时）
+                    stall_state[0] = 0
+                    stall_state[1] = monotonic()
 
                 text_emitted = LayoutEngine.spawn_new_danmakus(
                     layout_ctx, current_time, danmaku_pool, active_text,
