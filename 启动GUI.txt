@@ -1,9 +1,9 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_gui.ps1 -python "C:\Users\Yuu\AppData\Local\Python\bin\python.exe"
 
--global_quality32 -preset faster -c:a copy
+-global_quality 32 -preset faster -c:a copy
+32越大，质量越低
 
 ffmpeg烧录ass字幕视频命令：
-
 ffmpeg -i input.mp4 -vf "ass=subtitle.ass" -c:v libx264 -crf 23 -preset medium -c:a copy output.mp4
 
 源视频720P：

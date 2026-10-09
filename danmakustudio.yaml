@@ -3,43 +3,40 @@ style:
   layer_width_extra: 100
   row_vertical_gap: 1
   multiline_row_gap: 1
-  font_family: Microsoft YaHei
-  font_size: 32
+  font_family: 思源黑体 Heavy
+  font_size: 36
   text:
     color: '#FFFFFF'
-    opacity: 0.6
+    opacity: 0.45
     outline_color: '#000000'
     outline_width: 1.0
     shadow_color: '#282828'
-    shadow_opacity: 0.6
+    shadow_opacity: 0.45
   member_text:
     color: '#50ff8d'
-    opacity: 0.6
+    opacity: 0.45
     outline_color: '#246542'
     outline_width: 1.0
     shadow_color: '#000000'
-    shadow_opacity: 0.6
+    shadow_opacity: 0.45
   emoji:
-    opacity: 1.0
+    opacity: 0.9
     size_ratio: 1.0
     spacing: 4
+  render_scale: 1.0
 ratio:
   max_text_rows: 20
   text_width_ratio: 0.8
   top_margin: 12
-  bottom_margin: 600
+  bottom_margin: 500
 animation:
-  first_danmaku_at: 2.0
+  first_danmaku_at: 0.0
 encode:
   gpu_preset: p5
   gpu_cq: 15
   qsv_preset: slow
   qsv_quality: 18
-  # QSV 编码绑定的显卡 PCI vendor id（0x8086=Intel）。
-  # 多适配器机器（虚拟显示适配器 + 真实显卡）上用于把 QSV 会话
-  # 钉定到真实 Intel 显卡，避免会话落在虚拟适配器上导致停转；
-  # 设为 0 走 ffmpeg 自动选择。
-  qsv_vendor_id: 0x8086
+  qsv_vendor_id: 32902
   cpu_preset: medium
   cpu_crf: 18
   cpu_min_reserve_threads: 2
@@ -59,6 +56,6 @@ recorder:
   output_template: '%(upload_date)s_%(title)s.%(ext)s'
   live_from_start: true
   record_chat: true
+  monitor_interval: 60.0
   sync_mode: auto
   av_offset: 0.0
-  monitor_interval: 60.0
