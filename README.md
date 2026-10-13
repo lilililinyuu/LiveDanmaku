@@ -87,6 +87,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_gui.ps1
 ```
 
+环境就绪后（`.venv` 已存在），日常启动直接双击项目根目录的 **`启动GUI.bat`** 即可——它用 `.venv` 的 `pythonw.exe` 无控制台窗口启动 GUI；需要看控制台日志时改用：
+
+```powershell
+.venv\Scripts\python.exe -m danmakustudio.gui
+```
+
 `test.ps1` 和 `run_gui.ps1` 在干净 clone 中发现 `.venv` 不存在时，也会自动先调用 `setup.ps1`。测试临时文件写入仓库内已忽略的 `.pytest-tmp/`，不会依赖系统临时目录权限。
 
 ### 手动安装

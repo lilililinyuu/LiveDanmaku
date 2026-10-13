@@ -32,16 +32,19 @@ def configure_logger() -> None:
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger.remove()
 
-    isatty = getattr(sys.stderr, "isatty", None)
-    colorize = bool(isatty and isatty())
+    # pythonw / PyInstaller windowed 模式下 sys.stderr 为 None（或不可写），
+    # 跳过终端 sink，只保留文件日志
+    if sys.stderr is not None and hasattr(sys.stderr, "write"):
+        isatty = getattr(sys.stderr, "isatty", None)
+        colorize = bool(isatty and isatty())
 
-    logger.add(
-        sink=sys.stderr,
-        format=_STDERR_FORMAT,
-        level="INFO",
-        colorize=colorize,
-        enqueue=True,
-    )
+        logger.add(
+            sink=sys.stderr,
+            format=_STDERR_FORMAT,
+            level="INFO",
+            colorize=colorize,
+            enqueue=True,
+        )
 
     logger.add(
         sink=str(_LOG_DIR / "ffmpeg.log"),

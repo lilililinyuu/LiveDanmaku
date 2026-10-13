@@ -39,6 +39,10 @@ __all__ = [
 
 
 def main() -> None:
+    from .logger_config import configure_logger
+
+    # 尽早初始化日志（pythonw / 窗口模式下无控制台，落文件排障）
+    configure_logger()
     app = QApplication.instance()
     if not isinstance(app, QApplication):
         app = QApplication(sys.argv)
