@@ -1,6 +1,6 @@
-# DanmakuStudio
+# LiveDanmaku · 直播弹幕工坊
 
-图形化弹幕/LRC 批量压制工具。它可以将直播录像与弹幕 XML/LRC/JSON 合成，以从右往左滚动的半透明文本形式将弹幕永久烧录到视频中。
+YouTube 直播弹幕一体化工具：直播录制（自动监控开播）/ 视频与弹幕下载 → 弹幕转换与高潮点分析 → 样式定制与预览 → 压制烧录成片。图形化批量压制弹幕/LRC，以从右往左滚动的半透明文本形式将弹幕永久烧录到视频中。
 
 ## 特性
 
@@ -10,7 +10,7 @@
 - **开头弹幕删除** - 可删除开头 N 条弹幕（如直播开始前的测试弹幕）；支持参照选择一条（默认展示前 50 条，条数可调整），删除其之前的全部弹幕
 - **滚动弹幕** - 弹幕从视频右端向左匀速滚动，多行车道布局
 - **文本样式** - 字体颜色/字体类型/大小可调（字体列表支持按名称搜索、可收藏字体置顶），支持描边与文本阴影（颜色+不透明度）；会员与普通用户样式可完全分开调整
-- **Emoji 图片加载** - 本地 `assets/emoji/` PNG 与 YouTube 平台表情（转换时在 XML 中内嵌图片 URL，压制时按需下载缓存到 `~/.danmakustudio_emoji_cache/`）均可显示，不透明度、大小、间距独立可调
+- **Emoji 图片加载** - 本地 `assets/emoji/` PNG 与 YouTube 平台表情（转换时在 XML 中内嵌图片 URL，压制时按需下载缓存到 `~/.livedanmaku_emoji_cache/`）均可显示，不透明度、大小、间距独立可调
 - **字体回退** - 多字体族链式匹配，未覆盖字符自动尝试系统字体回退
 - **FFmpeg 编码** - 支持自动检测 GPU / QSV / CPU 编码路径；自动模式下无可用硬件编码时回退到 CPU
 - **自定义压缩参数** - `encode.extra_args` 与界面「自定义参数」输入框可追加任意 ffmpeg 参数，完全接管压缩设置
@@ -32,10 +32,10 @@
 
 ### EXE 运行
 
-打包后的 `DanmakuStudio.exe` 不需要用户额外安装 Python，但需要：
+打包后的 `LiveDanmaku.exe` 不需要用户额外安装 Python，但需要：
 
 - Windows 系统
-- 保留整个 `dist\DanmakuStudio\` 文件夹，不要只复制单个 exe
+- 保留整个 `dist\LiveDanmaku\` 文件夹，不要只复制单个 exe
 - `ffmpeg.exe` 和 `ffprobe.exe` 可被程序找到
 
 推荐把 FFmpeg 的 `bin` 目录加入系统环境变量 `Path`。可以用下面命令验证：
@@ -66,8 +66,8 @@ ffmpeg -hide_banner -encoders | findstr nvenc
 ### Windows 一键初始化（推荐）
 
 ```bash
-git clone https://github.com/febr30th/DanmakuStudio.git
-cd DanmakuStudio
+git clone https://github.com/febr30th/LiveDanmaku.git
+cd LiveDanmaku
 ```
 
 在 PowerShell 中运行：
@@ -90,7 +90,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run_gui.ps1
 环境就绪后（`.venv` 已存在），日常启动直接双击项目根目录的 **`启动GUI.bat`** 即可——它用 `.venv` 的 `pythonw.exe` 无控制台窗口启动 GUI；需要看控制台日志时改用：
 
 ```powershell
-.venv\Scripts\python.exe -m danmakustudio.gui
+.venv\Scripts\python.exe -m livedanmaku.gui
 ```
 
 `test.ps1` 和 `run_gui.ps1` 在干净 clone 中发现 `.venv` 不存在时，也会自动先调用 `setup.ps1`。测试临时文件写入仓库内已忽略的 `.pytest-tmp/`，不会依赖系统临时目录权限。
@@ -122,19 +122,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run_gui.ps1
 也可以在已安装依赖或已激活虚拟环境后直接运行模块：
 
 ```bash
-python -m danmakustudio.gui
+python -m livedanmaku.gui
 ```
 
 安装项目后还可以使用命令入口：
 
 ```bash
-danmakustudio-gui
+livedanmaku-gui
 ```
 
-也可以无参数运行 `danmakustudio` 打开图形界面：
+也可以无参数运行 `livedanmaku` 打开图形界面：
 
 ```bash
-danmakustudio
+livedanmaku
 ```
 
 在图形界面中可以选择视频文件或文件夹。选择文件夹时会递归查找其中支持的视频文件，并自动匹配同目录下的同名字幕文件。
@@ -201,19 +201,19 @@ danmakustudio
 
 ## 配置## 配置
 
-通过 `danmakustudio.yaml` 调整行为。
+通过 `livedanmaku.yaml` 调整行为。
 
 配置优先级：
 
 ```text
-界面「配置文件」框指定的 YAML > 当前目录 danmakustudio.yaml > 用户目录 danmakustudio.yaml > 内置默认值
+界面「配置文件」框指定的 YAML > 当前目录 livedanmaku.yaml > 用户目录 livedanmaku.yaml > 内置默认值
 ```
 
 如果显式指定的配置文件不存在或结构不合法，程序会直接报错，不会继续回退到其它配置文件。
 
-EXE 运行时，图形界面会优先使用 exe 同目录下的 `danmakustudio.yaml`，用户可以直接编辑；也可以在界面「保存样式到 YAML…」中把当前样式写出为新配置。
+EXE 运行时，图形界面会优先使用 exe 同目录下的 `livedanmaku.yaml`，用户可以直接编辑；也可以在界面「保存样式到 YAML…」中把当前样式写出为新配置。
 
-下表中，“随项目配置值”来自当前仓库中的 `danmakustudio.yaml`；删除该文件或删除某个字段后，对应字段会回退到“内置默认值”。
+下表中，“随项目配置值”来自当前仓库中的 `livedanmaku.yaml`；删除该文件或删除某个字段后，对应字段会回退到“内置默认值”。
 
 ### 布局样式 (style)
 
@@ -269,7 +269,7 @@ EXE 运行时，图形界面会优先使用 exe 同目录下的 `danmakustudio.y
 
 ### 编码参数 (encode)
 
-当前 `danmakustudio.yaml` 中的编码参数处于注释状态，因此使用内置默认值。
+当前 `livedanmaku.yaml` 中的编码参数处于注释状态，因此使用内置默认值。
 
 | 参数                        | 内置默认值    | 说明                                 |
 | ------------------------- | -------- | ---------------------------------- |
@@ -292,7 +292,7 @@ encode:
 
 ### 系统参数 (system)
 
-当前 `danmakustudio.yaml` 中的系统参数处于注释状态，因此使用内置默认值。
+当前 `livedanmaku.yaml` 中的系统参数处于注释状态，因此使用内置默认值。
 
 | 参数                      | 内置默认值    | 说明                          |
 | ----------------------- | -------- | --------------------------- |
@@ -305,7 +305,7 @@ encode:
 
 ## 打包
 
-项目根目录提供一键打包脚本。干净 clone 中执行时，脚本会创建独立的 `.venv-build`、安装项目和 PyInstaller，然后根据 `DanmakuStudio.spec` 打包：
+项目根目录提供一键打包脚本。干净 clone 中执行时，脚本会创建独立的 `.venv-build`、安装项目和 PyInstaller，然后根据 `LiveDanmaku.spec` 打包：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_exe.ps1
@@ -320,12 +320,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build_exe.ps1 -CheckOnly
 打包完成后，可执行文件位于：
 
 ```text
-dist\DanmakuStudio\DanmakuStudio.exe
+dist\LiveDanmaku\LiveDanmaku.exe
 ```
 
-发布时请保留整个 `dist\DanmakuStudio\` 文件夹。程序仍依赖系统中的 FFmpeg / ffprobe。
+发布时请保留整个 `dist\LiveDanmaku\` 文件夹。程序仍依赖系统中的 FFmpeg / ffprobe。
 
-不要运行 `build\DanmakuStudio\DanmakuStudio.exe`；它是 PyInstaller 的中间产物。最终程序是 `dist\DanmakuStudio\DanmakuStudio.exe`。
+不要运行 `build\LiveDanmaku\LiveDanmaku.exe`；它是 PyInstaller 的中间产物。最终程序是 `dist\LiveDanmaku\LiveDanmaku.exe`。
 
 ## 处理流程
 
@@ -343,9 +343,9 @@ dist\DanmakuStudio\DanmakuStudio.exe
 ## 项目结构
 
 ```text
-DanmakuStudio/
-├── src/danmakustudio/        # 核心包
-│   ├── cli.py                # 图形界面启动入口（控制台脚本 danmakustudio）
+LiveDanmaku/
+├── src/livedanmaku/        # 核心包
+│   ├── cli.py                # 图形界面启动入口（控制台脚本 livedanmaku）
 │   ├── gui.py                # 图形界面入口
 │   ├── batch.py              # 批量文件发现与字幕匹配
 │   ├── config/               # 配置模块
@@ -357,13 +357,13 @@ DanmakuStudio/
 │   ├── ui/                   # 图形界面（主窗口/样式面板/下载与转换页/后台线程）
 │   └── utils/                # 工具函数与输入输出校验
 ├── tests/                    # 测试
-├── DanmakuStudio.spec        # PyInstaller 打包配置
+├── LiveDanmaku.spec        # PyInstaller 打包配置
 ├── setup.ps1                 # 一键安装运行与开发依赖
 ├── test.ps1                  # 一键运行测试
 ├── run_gui.ps1               # 一键启动 GUI
 ├── build_exe.ps1             # 一键打包 / 打包前检
 ├── scripts/_common.ps1       # PowerShell 公共辅助函数
-├── danmakustudio.yaml        # 默认配置文件
+├── livedanmaku.yaml        # 默认配置文件
 ├── pyproject.toml
 ├── uv.lock
 ├── LICENSE
@@ -380,4 +380,4 @@ DanmakuStudio/
 
 ## 致谢
 
-本项目基于[febr30th/DanmakuStudio](https://github.com/febr30th/DanmakuStudio))修改。
+本项目基于[febr30th/LiveDanmaku](https://github.com/febr30th/LiveDanmaku))修改。

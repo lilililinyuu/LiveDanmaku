@@ -6,25 +6,25 @@ from itertools import pairwise
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from danmakustudio.config import DEFAULT_CONFIG
-from danmakustudio.config.models import (
+from livedanmaku.config import DEFAULT_CONFIG
+from livedanmaku.config.models import (
     DanmakuConfig,
     EncodeMode,
     LayoutStyle,
     TextStyle,
 )
-from danmakustudio.ui._shared import config_dialog_start_location
-from danmakustudio.ui.file_picker import FileFolderPickerDialog
-from danmakustudio.ui.main_window import DanmakuStudioWindow, TrimReferenceDialog
-from danmakustudio.ui.style_panel import StylePanel
-from danmakustudio.ui.theme import APP_STYLESHEET, CheckMarkCheckBox, apply_theme
+from livedanmaku.ui._shared import config_dialog_start_location
+from livedanmaku.ui.file_picker import FileFolderPickerDialog
+from livedanmaku.ui.main_window import LiveDanmakuWindow, TrimReferenceDialog
+from livedanmaku.ui.style_panel import StylePanel
+from livedanmaku.ui.theme import APP_STYLESHEET, CheckMarkCheckBox, apply_theme
 
 
 @pytest.fixture(autouse=True)
 def _isolate_gui_state(monkeypatch, tmp_path):
     """隔离 GUI 状态文件，避免测试污染用户真实配置。"""
     monkeypatch.setattr(
-        "danmakustudio.ui.style_panel.gui_style_path",
+        "livedanmaku.ui.style_panel.gui_style_path",
         lambda: tmp_path / "gui_style.json",
     )
 
@@ -40,13 +40,13 @@ def test_apply_theme_sets_application_stylesheet(qapp):
 
 def test_main_window_initial_state(qapp):
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     assert window.status_badge.text() == "等待任务"
     assert window.status_badge.property("state") == "idle"
     assert window.encode_combo.currentData() == EncodeMode.AUTO
     assert isinstance(window.force_checkbox, CheckMarkCheckBox)
-    assert window.windowTitle() == "DanmakuStudio · 弹幕压制工作台"
+    assert window.windowTitle() == "LiveDanmaku · 直播弹幕工坊"
     assert not window.windowIcon().isNull()
     assert window.btn_choose.text() == "选择视频或文件夹"
     assert not window.btn_start.isEnabled()
@@ -79,7 +79,7 @@ def test_config_dialog_prefers_selected_file_then_last_directory(tmp_path):
 
 
 def test_main_window_reports_overall_batch_progress(qapp):
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     window.on_worker_progress(
         task_index=2,
@@ -169,7 +169,7 @@ def test_json_page_converts_and_adopts_job(qapp, tmp_path, monkeypatch):
     )
 
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.json_path_edit.setText(str(chat))
     monkeypatch.setattr(
         QMessageBox, "question",
@@ -296,7 +296,7 @@ def test_style_panel_member_and_emoji_overrides(qapp):
 def test_main_window_first_danmaku_controls(qapp):
     """首条弹幕时间控件：默认未勾选、默认值 2.0 秒。"""
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     assert not window.first_danmaku_check.isChecked()
     assert window.first_danmaku_spin.value() == 2.0
@@ -341,7 +341,7 @@ def test_style_panel_member_controls_modify_overrides(qapp):
 
 def test_main_window_has_style_panel(qapp):
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     assert window.style_panel is not None
     assert window.style_panel.style_overrides() is None  # 默认未勾选
@@ -359,7 +359,7 @@ def test_style_panel_rows_do_not_overlap(qapp):
     本测试在真实主窗口默认尺寸下测量行几何。
     """
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.style_panel.custom_check.setChecked(True)
     window.nav_list.setCurrentRow(1)  # 切到弹幕样式页，隐藏页面的几何坐标不可靠
     window.show()
@@ -400,7 +400,7 @@ def test_style_panel_rows_do_not_overlap(qapp):
 def test_main_window_drop_first_and_clip_start_defaults(qapp):
     """删除开头弹幕默认 0；自定义起点仅在测试片段开启后可用。"""
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     assert window.drop_first_spin.value() == 0
     assert window.drop_first_spin.minimum() == 0
@@ -428,7 +428,7 @@ def test_main_window_drop_first_and_clip_start_defaults(qapp):
 def test_main_window_effective_config_applies_overrides(qapp, tmp_path):
     """_effective_config 应合并配置文件、样式覆盖与首条弹幕时间。"""
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     cfg_file = tmp_path / "c.yaml"
     cfg_file.write_text("style:\n  font_size: 33\n", encoding="utf-8")
@@ -464,7 +464,7 @@ def _write_numbered_xml(tmp_path, count=5):
 
 
 def test_trim_reference_dialog_returns_keep_index(qapp, tmp_path):
-    from danmakustudio.input.parser import parse_subtitle
+    from livedanmaku.input.parser import parse_subtitle
 
     events = parse_subtitle(str(_write_numbered_xml(tmp_path)))
 
@@ -481,8 +481,8 @@ def test_trim_reference_dialog_returns_keep_index(qapp, tmp_path):
 
 
 def test_trim_reference_dialog_caps_at_window(qapp, tmp_path):
-    from danmakustudio.input.parser import parse_subtitle
-    from danmakustudio.ui.main_window import _TRIM_REF_WINDOW
+    from livedanmaku.input.parser import parse_subtitle
+    from livedanmaku.ui.main_window import _TRIM_REF_WINDOW
 
     events = parse_subtitle(str(_write_numbered_xml(tmp_path, count=_TRIM_REF_WINDOW + 10)))
 
@@ -497,11 +497,11 @@ def test_main_window_drop_reference_adopts_selection(qapp, tmp_path, monkeypatch
     """参照选择确认后应把 drop_first 设置为「所选序号 - 1」。"""
     from PySide6.QtWidgets import QDialog
 
-    from danmakustudio.batch import BatchJob
+    from livedanmaku.batch import BatchJob
 
     subtitle = _write_numbered_xml(tmp_path)
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.pending_jobs = [
         BatchJob(
             video_path=tmp_path / "v.mp4",
@@ -522,7 +522,7 @@ def test_main_window_drop_reference_adopts_selection(qapp, tmp_path, monkeypatch
             return 4
 
     monkeypatch.setattr(
-        "danmakustudio.ui.main_window.TrimReferenceDialog", FakeDialog
+        "livedanmaku.ui.main_window.TrimReferenceDialog", FakeDialog
     )
 
     window.choose_drop_first_reference()
@@ -532,7 +532,7 @@ def test_main_window_drop_reference_adopts_selection(qapp, tmp_path, monkeypatch
 
 
 def test_batch_worker_accepts_drop_first_and_clip_start(qapp):
-    from danmakustudio.ui.worker import BatchWorker
+    from livedanmaku.ui.worker import BatchWorker
 
     worker = BatchWorker(
         jobs=[],
@@ -551,7 +551,7 @@ def test_batch_worker_accepts_drop_first_and_clip_start(qapp):
 def test_download_page_format_field(qapp):
     """下载页格式字段应去除首尾空白；空值表示使用默认格式。"""
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     assert window._download_format() == ""
     window.dl_format_edit.setText("  bv*[height<=720]+ba/b  ")
@@ -565,7 +565,7 @@ def test_main_window_sidebar_navigation(qapp):
     from PySide6.QtWidgets import QPushButton
 
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
 
     assert window.nav_list.count() == 5
     assert window.nav_list.item(0).text() == "压制设置"
@@ -590,7 +590,7 @@ def test_main_window_sidebar_navigation(qapp):
 def test_main_window_sidebar_collapse(qapp):
     """收起侧边栏后仅保留窄条，再点恢复导航列表。"""
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.show()
     qapp.processEvents()
 
@@ -617,7 +617,7 @@ def test_main_window_task_area_below_pages(qapp):
     from PySide6.QtWidgets import QSplitter
 
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.show()
     qapp.processEvents()
 
@@ -661,7 +661,7 @@ def test_json_download_pages_hug_content(qapp):
     from PySide6.QtWidgets import QFrame
 
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.resize(1120, 780)
     window.show()
     qapp.processEvents()
@@ -687,7 +687,7 @@ def test_download_worker_converts_out_dir_to_path(qapp, tmp_path, monkeypatch):
     """回归：界面传入字符串保存目录时，worker 应转为 Path 再调用下载。"""
     from pathlib import Path
 
-    from danmakustudio.ui.worker import DownloadWorker
+    from livedanmaku.ui.worker import DownloadWorker
 
     captured = {}
 
@@ -696,7 +696,7 @@ def test_download_worker_converts_out_dir_to_path(qapp, tmp_path, monkeypatch):
         return {"video": None, "chat": None, "thumbnail": None}
 
     monkeypatch.setattr(
-        "danmakustudio.core.pipeline.download_items", fake_download_items
+        "livedanmaku.core.pipeline.download_items", fake_download_items
     )
 
     worker = DownloadWorker(
@@ -716,7 +716,7 @@ def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
     """参照选择应支持 JSON 弹幕文件（压制设置页的删除开头弹幕）。"""
     from PySide6.QtWidgets import QDialog
 
-    from danmakustudio.batch import BatchJob
+    from livedanmaku.batch import BatchJob
 
     subtitle = tmp_path / "直播.live_chat.json"
     subtitle.write_text(
@@ -732,7 +732,7 @@ def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
         encoding="utf-8",
     )
     apply_theme(qapp)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.pending_jobs = [
         BatchJob(
             video_path=tmp_path / "直播.mp4",
@@ -753,7 +753,7 @@ def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
             return 1
 
     monkeypatch.setattr(
-        "danmakustudio.ui.main_window.TrimReferenceDialog", FakeDialog
+        "livedanmaku.ui.main_window.TrimReferenceDialog", FakeDialog
     )
 
     window.choose_drop_first_reference()
@@ -764,7 +764,7 @@ def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
 
 def test_trim_reference_dialog_count_adjustable(qapp, tmp_path):
     """参照列表的显示条数应可通过「显示条数」调整（默认 50）。"""
-    from danmakustudio.input.parser import parse_subtitle
+    from livedanmaku.input.parser import parse_subtitle
 
     events = parse_subtitle(str(_write_numbered_xml(tmp_path, count=80)))
 
@@ -786,7 +786,7 @@ def test_trim_reference_dialog_count_adjustable(qapp, tmp_path):
 
 def test_trim_reference_dialog_default_is_50(qapp):
     """默认参照窗口应为 50 条。"""
-    from danmakustudio.ui.main_window import _TRIM_REF_WINDOW
+    from livedanmaku.ui.main_window import _TRIM_REF_WINDOW
 
     assert _TRIM_REF_WINDOW == 50
 
@@ -798,7 +798,7 @@ def test_trim_reference_dialog_default_is_50(qapp):
 
 def test_gui_log_bridge_is_singleton():
     """日志桥全局唯一，与界面同寿命。"""
-    from danmakustudio.ui.worker import get_gui_log_bridge
+    from livedanmaku.ui.worker import get_gui_log_bridge
 
     assert get_gui_log_bridge() is get_gui_log_bridge()
 
@@ -806,7 +806,7 @@ def test_gui_log_bridge_is_singleton():
 def test_qt_log_stream_emits_to_signal(qapp):
     from PySide6.QtCore import QObject, Signal
 
-    from danmakustudio.ui.worker import QtLogStream
+    from livedanmaku.ui.worker import QtLogStream
 
     class _Sink(QObject):
         got = Signal(str)
@@ -825,7 +825,7 @@ def test_qt_log_stream_survives_deleted_signal_source(qapp):
     RuntimeError（loguru stderr sink 持有旧流时的 Logging error）。"""
     from PySide6.QtCore import QObject, Signal
 
-    from danmakustudio.ui.worker import QtLogStream
+    from livedanmaku.ui.worker import QtLogStream
 
     class _Sink(QObject):
         got = Signal(str)

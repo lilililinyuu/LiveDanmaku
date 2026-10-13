@@ -2,7 +2,7 @@
 
 import json
 
-from danmakustudio.core.highlight import (
+from livedanmaku.core.highlight import (
     analyze_highlights,
     extract_chat_times,
     format_clock,

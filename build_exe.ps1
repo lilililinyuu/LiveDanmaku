@@ -13,9 +13,9 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $BuildVenv = Resolve-ProjectPath -ProjectRoot $ProjectRoot -Path $Venv
 $BuildPython = Get-VenvPythonPath -VenvPath $BuildVenv
-$SpecFile = Join-Path $ProjectRoot "DanmakuStudio.spec"
-$OutputDir = Join-Path $ProjectRoot "dist\DanmakuStudio"
-$OutputExe = Join-Path $OutputDir "DanmakuStudio.exe"
+$SpecFile = Join-Path $ProjectRoot "LiveDanmaku.spec"
+$OutputDir = Join-Path $ProjectRoot "dist\LiveDanmaku"
+$OutputExe = Join-Path $OutputDir "LiveDanmaku.exe"
 
 Set-Location $ProjectRoot
 
@@ -40,7 +40,7 @@ if (-not $SkipInstall) {
 Write-Host "Checking build imports..."
 Invoke-CheckedCommand -FilePath $BuildPython -ArgumentList @(
     "-c",
-    "import PyInstaller, danmakustudio; print('Build import check passed')"
+    "import PyInstaller, livedanmaku; print('Build import check passed')"
 )
 
 if ($CheckOnly) {
@@ -48,12 +48,12 @@ if ($CheckOnly) {
     return
 }
 
-Write-Host "Building DanmakuStudio..."
+Write-Host "Building LiveDanmaku..."
 Invoke-CheckedCommand -FilePath $BuildPython -ArgumentList @(
     "-m", "PyInstaller", "--noconfirm", "--clean", $SpecFile
 )
 
-$ConfigSource = Join-Path $ProjectRoot "danmakustudio.yaml"
+$ConfigSource = Join-Path $ProjectRoot "livedanmaku.yaml"
 if (Test-Path -LiteralPath $ConfigSource) {
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
     Copy-Item -LiteralPath $ConfigSource -Destination $OutputDir -Force

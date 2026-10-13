@@ -2,13 +2,13 @@
 
 import pytest
 
-from danmakustudio.config import DEFAULT_CONFIG
-from danmakustudio.core.burner import danmaku_layout_context, danmaku_state_at
-from danmakustudio.core.preview import default_preview_times
-from danmakustudio.input.event import DanmakuEvent
-from danmakustudio.layout.active import ActiveDanmaku
-from danmakustudio.layout.engine import LayoutContext
-from danmakustudio.render.layout_builder import DanmakuLayoutBuilder
+from livedanmaku.config import DEFAULT_CONFIG
+from livedanmaku.core.burner import danmaku_layout_context, danmaku_state_at
+from livedanmaku.core.preview import default_preview_times
+from livedanmaku.input.event import DanmakuEvent
+from livedanmaku.layout.active import ActiveDanmaku
+from livedanmaku.layout.engine import LayoutContext
+from livedanmaku.render.layout_builder import DanmakuLayoutBuilder
 
 
 def _make_danmaku(text, font_metrics, emoji_cache, time=1.0):

@@ -15,15 +15,15 @@ def get_app_dir() -> Path:
 
 
 def last_dir_path() -> Path:
-    return Path.home() / ".danmakustudio_last_dir.txt"
+    return Path.home() / ".livedanmaku_last_dir.txt"
 
 
 def last_config_dir_path() -> Path:
-    return Path.home() / ".danmakustudio_last_config_dir.txt"
+    return Path.home() / ".livedanmaku_last_config_dir.txt"
 
 
 def gui_style_path() -> Path:
-    return Path.home() / ".danmakustudio_gui_style.json"
+    return Path.home() / ".livedanmaku_gui_style.json"
 
 
 def source_project_dir() -> Path:

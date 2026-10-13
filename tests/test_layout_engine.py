@@ -8,12 +8,12 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from danmakustudio.config import DEFAULT_CONFIG
-from danmakustudio.input.event import DanmakuEvent
-from danmakustudio.layout.active import ActiveDanmaku
-from danmakustudio.layout.engine import LayoutContext, LayoutEngine
-from danmakustudio.layout.params import LayerParams
-from danmakustudio.render.layout_builder import SHADOW_DX, DanmakuLayoutBuilder
+from livedanmaku.config import DEFAULT_CONFIG
+from livedanmaku.input.event import DanmakuEvent
+from livedanmaku.layout.active import ActiveDanmaku
+from livedanmaku.layout.engine import LayoutContext, LayoutEngine
+from livedanmaku.layout.params import LayerParams
+from livedanmaku.render.layout_builder import SHADOW_DX, DanmakuLayoutBuilder
 
 MAX_CONTENT_WIDTH = 800
 LINE_HEIGHT = 36  # 与 conftest.py 保持一致，QFontMetrics.height() 实测值

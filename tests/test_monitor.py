@@ -2,7 +2,7 @@
 
 import subprocess
 
-from danmakustudio.core.monitor import probe_channel_live
+from livedanmaku.core.monitor import probe_channel_live
 
 
 class _FakeRunResult:

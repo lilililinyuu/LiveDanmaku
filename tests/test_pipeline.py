@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from danmakustudio.core.pipeline import (
+from livedanmaku.core.pipeline import (
     download_items,
     parse_ytdlp_paths,
 )
-from danmakustudio.errors import DanmakuStudioError
+from livedanmaku.errors import LiveDanmakuError
 
 
 def test_parse_ytdlp_paths():
@@ -40,7 +40,7 @@ def test_parse_ytdlp_paths_same_name_json():
 
 
 def test_download_items_no_selection():
-    with pytest.raises(DanmakuStudioError, match="未选择"):
+    with pytest.raises(LiveDanmakuError, match="未选择"):
         download_items(
             "http://example.com", Path("."), "b",
             want_video=False, want_chat=False, want_thumbnail=False,
@@ -107,7 +107,7 @@ def test_download_items_thumbnail_only_command(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     # 未创建真实封面文件 → 应报「未找到封面」；但命令已可断言
-    with pytest.raises(DanmakuStudioError, match="封面"):
+    with pytest.raises(LiveDanmakuError, match="封面"):
         download_items(
             "http://example.com", tmp_path, "b",
             want_video=False, want_chat=False, want_thumbnail=True,
@@ -153,7 +153,7 @@ def test_download_items_nonzero_exit(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    with pytest.raises(DanmakuStudioError, match="视频下载失败"):
+    with pytest.raises(LiveDanmakuError, match="视频下载失败"):
         download_items(
             "http://example.com", tmp_path, "b",
             want_video=True, want_chat=False, want_thumbnail=False,
@@ -231,7 +231,7 @@ def test_download_items_total_failure_raises(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
-    with pytest.raises(DanmakuStudioError, match="视频下载失败"):
+    with pytest.raises(LiveDanmakuError, match="视频下载失败"):
         download_items(
             "http://example.com", tmp_path, "b",
             want_video=True, want_chat=True, want_thumbnail=False,
@@ -262,7 +262,7 @@ def test_download_items_passes_proxy_flag(monkeypatch, tmp_path):
 
 def test_iter_output_lines_splits_carriage_returns():
     """\r 刷新的 ffmpeg/yt-dlp 进度应被拆成独立行。"""
-    from danmakustudio.core.pipeline import _iter_output_lines
+    from livedanmaku.core.pipeline import _iter_output_lines
 
     class Stream:
         text = "[download] 10%\r[download] 50%\r[download] 100%\nfilepath"

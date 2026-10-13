@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from ..errors import DanmakuStudioError
+from ..errors import LiveDanmakuError
 
 _PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "all_proxy")
 
@@ -118,13 +118,13 @@ def download_items(
     代理变量，避免环境残留代理干扰下载与 ffmpeg 切片。
     """
     if not (want_video or want_chat or want_thumbnail):
-        raise DanmakuStudioError("未选择任何要下载的内容。")
+        raise LiveDanmakuError("未选择任何要下载的内容。")
     if shutil.which("yt-dlp") is None:
-        raise DanmakuStudioError(
+        raise LiveDanmakuError(
             "未找到 yt-dlp，请先安装: pip install yt-dlp（或 winget install yt-dlp.yt-dlp）"
         )
     if want_thumbnail and shutil.which("ffmpeg") is None:
-        raise DanmakuStudioError(
+        raise LiveDanmakuError(
             "未找到 ffmpeg，无法把封面转换为 PNG，请先安装 ffmpeg。"
         )
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -232,7 +232,7 @@ def download_items(
         after = {p for p in out_dir.iterdir() if p.is_file()}
         thumbs = [p for p in (after - before) if p.suffix.lower() in _IMAGE_EXTS]
         if not thumbs:
-            raise DanmakuStudioError("未找到下载的封面图片，请检查 yt-dlp 输出。")
+            raise LiveDanmakuError("未找到下载的封面图片，请检查 yt-dlp 输出。")
         thumbnail = _largest_thumbnail_to_png(thumbs)
 
     # yt-dlp 异常退出时，只要有一部分请求的内容已成功获取，就按部分
@@ -242,7 +242,7 @@ def download_items(
         or (want_chat and chat is not None)
         or (want_thumbnail and thumbnail is not None)
     ):
-        raise DanmakuStudioError("\\n".join(error_messages))
+        raise LiveDanmakuError("\\n".join(error_messages))
     for message in error_messages:
         logger.warning("{}（已获取部分内容）", message)
         if on_output is not None:
@@ -250,7 +250,7 @@ def download_items(
 
     # 正常退出时视频必须拿到；弹幕是可选内容（很多视频没有直播弹幕）
     if want_video and video is None and not error_messages:
-        raise DanmakuStudioError("yt-dlp 输出中未找到视频文件，请检查下载结果。")
+        raise LiveDanmakuError("yt-dlp 输出中未找到视频文件，请检查下载结果。")
     if want_chat and chat is None and not error_messages:
         logger.warning("该视频没有可下载的弹幕 JSON（可能没有直播弹幕）")
 
@@ -307,7 +307,7 @@ def _largest_thumbnail_to_png(thumbs: list[Path]) -> Path:
         creationflags=_CREATE_NO_WINDOW,
     )
     if conv_result.returncode != 0 or not png_out.exists():
-        raise DanmakuStudioError(
+        raise LiveDanmakuError(
             f"封面转 PNG 失败: {conv_result.stderr[-400:] or '未生成输出文件'}"
         )
     # 清理所有下载的原始图片，只保留最终 PNG

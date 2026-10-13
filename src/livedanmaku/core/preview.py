@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage, QPainter
 
 from ..config.models import DEFAULT_CONFIG
 from ..encode.ffmpeg import FFmpegManager
-from ..errors import DanmakuStudioError
+from ..errors import LiveDanmakuError
 from ..input.parser import (
     align_first_event_time,
     drop_first_events,
@@ -121,7 +121,7 @@ def generate_previews(
     events, remote_emoji = parse_subtitle_with_emoji(subtitle_in)
     if drop_first > 0:
         if drop_first >= len(events):
-            raise DanmakuStudioError(
+            raise LiveDanmakuError(
                 f"删除条数 {drop_first} 不少于弹幕总数 {len(events)}（会删除全部弹幕）"
             )
         events = drop_first_events(events, drop_first)
@@ -129,7 +129,7 @@ def generate_previews(
     if config.animation.first_danmaku_at is not None:
         align_first_event_time(events, config.animation.first_danmaku_at)
     if not events:
-        raise DanmakuStudioError("弹幕文件没有任何事件")
+        raise LiveDanmakuError("弹幕文件没有任何事件")
 
     asset_provider = _build_asset_loader(config)
     asset_provider.load_assets(events, remote_emoji)
@@ -167,5 +167,5 @@ def generate_previews(
         logger.info(f"预览图: {path}")
 
     if not paths:
-        raise DanmakuStudioError("未能生成任何预览图（时间点均无活跃弹幕）")
+        raise LiveDanmakuError("未能生成任何预览图（时间点均无活跃弹幕）")
     return paths

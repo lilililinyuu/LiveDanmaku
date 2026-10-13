@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from danmakustudio.gui import main
+from livedanmaku.gui import main
 
 
 if __name__ == "__main__":

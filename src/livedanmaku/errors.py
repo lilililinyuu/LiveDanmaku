@@ -45,7 +45,7 @@ class ErrorContext:
 # 自定义异常
 # =============================================================================
 
-class DanmakuStudioError(Exception):
+class LiveDanmakuError(Exception):
     """项目基础异常"""
 
     def __init__(
@@ -59,25 +59,25 @@ class DanmakuStudioError(Exception):
         self.context = context or ErrorContext()
 
 
-class InputError(DanmakuStudioError):
+class InputError(LiveDanmakuError):
     """输入错误"""
     def __init__(self, message: str, context: ErrorContext | None = None):
         super().__init__(message, category=ErrorCategory.INPUT, context=context)
 
 
-class ConfigError(DanmakuStudioError):
+class ConfigError(LiveDanmakuError):
     """配置错误"""
     def __init__(self, message: str, context: ErrorContext | None = None):
         super().__init__(message, category=ErrorCategory.CONFIG, context=context)
 
 
-class RenderError(DanmakuStudioError):
+class RenderError(LiveDanmakuError):
     """渲染错误"""
     def __init__(self, message: str, context: ErrorContext | None = None):
         super().__init__(message, category=ErrorCategory.RENDER, context=context)
 
 
-class EncodeError(DanmakuStudioError):
+class EncodeError(LiveDanmakuError):
     """编码错误"""
     def __init__(self, message: str, context: ErrorContext | None = None):
         super().__init__(message, category=ErrorCategory.ENCODE, context=context)
@@ -87,7 +87,7 @@ class EncoderStalledError(EncodeError):
     """编码器停转（长时间无法消费帧），需要更换编码方式重试"""
 
 
-class ResourceError(DanmakuStudioError):
+class ResourceError(LiveDanmakuError):
     """资源错误"""
     def __init__(self, message: str, context: ErrorContext | None = None):
         super().__init__(message, category=ErrorCategory.RESOURCE, context=context)
@@ -113,7 +113,7 @@ class ErrorHandler:
         """
         context = context or ErrorContext()
 
-        if isinstance(error, DanmakuStudioError):
+        if isinstance(error, LiveDanmakuError):
             category = error.category
             message = str(error)
         else:

@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-ROOT = r"D:\youtube-video-download\youtube-chat-export\danmaku\DanmakuStudio"
+ROOT = r"D:\youtube-video-download\youtube-chat-export\danmaku\LiveDanmaku"
 sys.path.insert(0, ROOT + r"\src")
 
 import ctypes
@@ -26,14 +26,14 @@ def commit_gb():
     return (s.ullTotalPageFile - s.ullAvailPageFile) / 2**30
 
 
-from danmakustudio.config.loader import load_config
-from danmakustudio.utils.helpers import ensure_qt_app
-from danmakustudio.core.burner import DanmakuBurner
+from livedanmaku.config.loader import load_config
+from livedanmaku.utils.helpers import ensure_qt_app
+from livedanmaku.core.burner import DanmakuBurner
 
 ensure_qt_app()
 
 OUT = ROOT + r"\直播录制\crash_repro.mp4"
-config = load_config(ROOT + r"\danmakustudio.yaml")
+config = load_config(ROOT + r"\livedanmaku.yaml")
 burner = DanmakuBurner(
     video_in=ROOT + r"\直播录制\喷嚏+播音员.mp4",
     xml_in=ROOT + r"\test.xml",

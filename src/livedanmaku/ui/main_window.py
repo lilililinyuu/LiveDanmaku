@@ -1,4 +1,4 @@
-"""DanmakuStudio 主窗口。"""
+"""LiveDanmaku 主窗口。"""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ from ..config.models import (
     apply_style_overrides,
 )
 from ..core.recorder import RecordParams
-from ..errors import DanmakuStudioError
+from ..errors import LiveDanmakuError
 from ..input.parser import parse_subtitle
 from ..input.trim import (
     default_trimmed_path,
@@ -255,12 +255,12 @@ class TrimExportDialog(QDialog):
         return self.count_spin.value(), self.radio_overwrite.isChecked()
 
 
-class DanmakuStudioWindow(QWidget):
-    """DanmakuStudio 主窗口。"""
+class LiveDanmakuWindow(QWidget):
+    """LiveDanmaku 主窗口。"""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DanmakuStudio · 弹幕压制工作台")
+        self.setWindowTitle("LiveDanmaku · 直播弹幕工坊")
         self.setObjectName("appRoot")
         self.resize(1120, 780)
         self.setMinimumSize(900, 640)
@@ -292,7 +292,7 @@ class DanmakuStudioWindow(QWidget):
 
         title_layout = QVBoxLayout()
         title_layout.setSpacing(1)
-        title = QLabel("DanmakuStudio")
+        title = QLabel("LiveDanmaku")
         title.setObjectName("pageTitle")
         subtitle = QLabel("批量弹幕压制工作台")
         subtitle.setObjectName("pageSubtitle")
@@ -346,7 +346,7 @@ class DanmakuStudioWindow(QWidget):
         self.config_edit = QLineEdit()
         self.config_edit.setPlaceholderText("留空则使用内置默认配置")
         self.config_edit.setClearButtonEnabled(True)
-        default_config = get_app_dir() / "danmakustudio.yaml"
+        default_config = get_app_dir() / "livedanmaku.yaml"
         if default_config.exists():
             self.config_edit.setText(str(default_config))
         self.config_edit.editingFinished.connect(self._reload_style_panel)
@@ -642,7 +642,7 @@ class DanmakuStudioWindow(QWidget):
         path = self.config_edit.text().strip() or None
         try:
             config = load_config(path)
-        except DanmakuStudioError:
+        except LiveDanmakuError:
             return
         self.style_panel.load_from(config)
 
@@ -768,7 +768,7 @@ class DanmakuStudioWindow(QWidget):
         """「直播录制」功能页：录制进行中的直播 / 监控频道开播自动录制。"""
         try:
             recorder = load_config(self.config_edit.text().strip() or None).recorder
-        except (DanmakuStudioError, AttributeError):
+        except (LiveDanmakuError, AttributeError):
             recorder = DEFAULT_CONFIG.recorder
 
         card = QFrame()
@@ -1044,7 +1044,7 @@ class DanmakuStudioWindow(QWidget):
             return
         try:
             recorder = load_config(self.config_edit.text().strip() or None).recorder
-        except DanmakuStudioError:
+        except LiveDanmakuError:
             recorder = DEFAULT_CONFIG.recorder
         self.monitor_worker = MonitorWorker(
             url,
@@ -1102,7 +1102,7 @@ class DanmakuStudioWindow(QWidget):
             recorder_cfg = load_config(
                 self.config_edit.text().strip() or None
             ).recorder
-        except (DanmakuStudioError, AttributeError):
+        except (LiveDanmakuError, AttributeError):
             recorder_cfg = DEFAULT_CONFIG.recorder
         card = QFrame()
         card.setObjectName("card")
@@ -1260,7 +1260,7 @@ class DanmakuStudioWindow(QWidget):
 
         try:
             config = self._effective_config()
-        except DanmakuStudioError as e:
+        except LiveDanmakuError as e:
             QMessageBox.warning(self, "提示", f"无法加载当前配置: {e}")
             return
 
@@ -1276,7 +1276,7 @@ class DanmakuStudioWindow(QWidget):
                 out_dir=video.parent / "preview",
                 drop_first=int(self.drop_first_spin.value()),
             )
-        except DanmakuStudioError as e:
+        except LiveDanmakuError as e:
             QMessageBox.critical(self, "预览失败", f"[{e.category.value}] {e}")
             return
         except Exception as e:
@@ -1338,7 +1338,7 @@ class DanmakuStudioWindow(QWidget):
         """把界面样式合并进配置并保存为 YAML 文件。"""
         try:
             config = self._effective_config()
-        except DanmakuStudioError as e:
+        except LiveDanmakuError as e:
             QMessageBox.warning(self, "提示", f"无法加载当前配置: {e}")
             return
 

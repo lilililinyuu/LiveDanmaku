@@ -112,7 +112,7 @@ function Assert-SupportedPython {
     }
 
     if ($version -lt [Version]"3.13") {
-        throw "DanmakuStudio requires Python 3.13 or newer; found $versionText"
+        throw "LiveDanmaku requires Python 3.13 or newer; found $versionText"
     }
 
     Write-Host "Using Python $versionText"

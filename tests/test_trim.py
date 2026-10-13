@@ -5,7 +5,7 @@ import json
 import pytest
 from lxml import etree
 
-from danmakustudio.input.trim import (
+from livedanmaku.input.trim import (
     default_trimmed_path,
     trim_chat_json_file,
     trim_subtitle_xml_file,

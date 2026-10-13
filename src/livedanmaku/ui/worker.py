@@ -17,7 +17,7 @@ from ..batch import BatchJob
 from ..config.loader import load_config
 from ..config.models import EncodeMode, StyleOverrides, apply_style_overrides
 from ..core.burner import DanmakuBurner
-from ..errors import DanmakuStudioError, handle_error
+from ..errors import LiveDanmakuError, handle_error
 from ..logger_config import configure_logger
 from ._shared import format_duration
 
@@ -222,7 +222,7 @@ class BatchWorker(QThread):
                     elapsed = format_duration(perf_counter() - job_started_at)
                     self.log.emit(f"状态: 完成，用时 {elapsed}")
                     generated += 1
-                except DanmakuStudioError as e:
+                except LiveDanmakuError as e:
                     elapsed = format_duration(perf_counter() - job_started_at)
                     self.log.emit(f"状态: 失败，用时 {elapsed}")
                     self.log.emit(f"原因 [{e.category.value}]: {e}")
@@ -282,7 +282,7 @@ class DownloadWorker(QThread):
 
     def run(self) -> None:
         from ..core.pipeline import download_items
-        from ..errors import DanmakuStudioError
+        from ..errors import LiveDanmakuError
 
         try:
             result = download_items(
@@ -294,7 +294,7 @@ class DownloadWorker(QThread):
                 section=self.section,
                 proxy=self.proxy,
             )
-        except DanmakuStudioError as e:
+        except LiveDanmakuError as e:
             self.failed.emit(str(e))
         except Exception as e:
             self.failed.emit(f"下载失败: {e}")

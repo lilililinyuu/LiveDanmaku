@@ -22,13 +22,13 @@ Invoke-CheckedCommand -FilePath $VenvPython -ArgumentList @(
     "-m", "pip", "install", "--upgrade", "pip"
 )
 
-Write-Host "Installing DanmakuStudio and development dependencies..."
+Write-Host "Installing LiveDanmaku and development dependencies..."
 Invoke-CheckedCommand -FilePath $VenvPython -ArgumentList @(
     "-m", "pip", "install", "--editable", ".", "--group", "dev"
 )
 
 Write-Host "Checking runtime and GUI imports..."
-& $VenvPython -c "import danmakustudio; from PySide6.QtGui import QImage; print('Runtime import check passed')"
+& $VenvPython -c "import livedanmaku; from PySide6.QtGui import QImage; print('Runtime import check passed')"
 if ($LASTEXITCODE -ne 0) {
     throw (
         "PySide6 could not load with the selected Python: $Python. " +

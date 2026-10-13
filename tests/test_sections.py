@@ -2,8 +2,8 @@
 
 import subprocess
 
-from danmakustudio.core.pipeline import download_items
-from danmakustudio.ui.worker import DownloadWorker
+from livedanmaku.core.pipeline import download_items
+from livedanmaku.ui.worker import DownloadWorker
 
 
 class _FakeStream:
@@ -108,7 +108,7 @@ def test_download_worker_passes_section(qapp, tmp_path, monkeypatch):
         return {"video": None, "chat": None, "thumbnail": None}
 
     monkeypatch.setattr(
-        "danmakustudio.core.pipeline.download_items", fake_download_items
+        "livedanmaku.core.pipeline.download_items", fake_download_items
     )
 
     worker = DownloadWorker(

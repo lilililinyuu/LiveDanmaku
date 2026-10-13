@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from danmakustudio.config.loader import load_config
-from danmakustudio.config.models import DEFAULT_CONFIG
-from danmakustudio.errors import ConfigError
+from livedanmaku.config.loader import load_config
+from livedanmaku.config.models import DEFAULT_CONFIG
+from livedanmaku.errors import ConfigError
 
 
 def test_load_config_explicit_missing_path_raises(tmp_path):
@@ -118,7 +118,7 @@ def test_load_config_text_style_validation_error(tmp_path):
 
 def test_config_to_yaml_roundtrip(tmp_path):
     """config_to_yaml 输出应能被 load_config 读回且与原配置相等。"""
-    from danmakustudio.config.loader import config_to_yaml
+    from livedanmaku.config.loader import config_to_yaml
 
     text = config_to_yaml(DEFAULT_CONFIG)
     target = tmp_path / "dump.yaml"

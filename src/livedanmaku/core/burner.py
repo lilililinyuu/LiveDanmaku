@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from ..config.models import DEFAULT_CONFIG, EncodeMode
 from ..encode.ffmpeg import FFmpegManager
-from ..errors import DanmakuStudioError, EncodeError, EncoderStalledError, InputError
+from ..errors import LiveDanmakuError, EncodeError, EncoderStalledError, InputError
 from ..input.parser import (
     align_first_event_time,
     drop_first_events,
@@ -205,7 +205,7 @@ class DanmakuBurner:
             run_failed = True
             logger.warning("用户中断压制")
             raise
-        except DanmakuStudioError:
+        except LiveDanmakuError:
             run_failed = True
             raise
         except Exception as e:
@@ -215,7 +215,7 @@ class DanmakuBurner:
             logger.debug("清理资源")
             try:
                 self._frame_encoder.cleanup()
-            except DanmakuStudioError:
+            except LiveDanmakuError:
                 if run_failed:
                     logger.exception("FFmpeg 清理阶段也发生错误")
                 else:

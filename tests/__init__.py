@@ -1,5 +1,5 @@
 """
-DanmakuStudio 测试套件
+LiveDanmaku 测试套件
 
 包含单元测试、集成测试和端到端测试
 """

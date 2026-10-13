@@ -82,7 +82,7 @@ class EmojiStyle:
 class LayoutStyle:
     """布局样式配置
 
-    内置默认值即项目当前推荐的样式（与仓库 danmakustudio.yaml 一致）。
+    内置默认值即项目当前推荐的样式（与仓库 livedanmaku.yaml 一致）。
     """
     danmaku_x: int = 20
     layer_width_extra: int = 100      # 已废弃：渲染层始终延伸至视频最右端，保留仅为兼容旧配置

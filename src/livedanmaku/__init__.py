@@ -1,4 +1,4 @@
-"""DanmakuStudio — 弹幕压制引擎
+"""LiveDanmaku — 弹幕压制引擎
 
 将 XML/LRC 弹幕文件渲染并叠加到视频上，生成带弹幕的视频文件。
 """

@@ -28,12 +28,12 @@ if ($CheckOnly) {
     Write-Host "Checking GUI imports..."
     Invoke-CheckedCommand -FilePath $VenvPython -ArgumentList @(
         "-c",
-        "import danmakustudio.gui; from PySide6.QtWidgets import QApplication; print('GUI import check passed')"
+        "import livedanmaku.gui; from PySide6.QtWidgets import QApplication; print('GUI import check passed')"
     )
     return
 }
 
-Write-Host "Starting DanmakuStudio GUI..."
+Write-Host "Starting LiveDanmaku GUI..."
 Invoke-CheckedCommand -FilePath $VenvPython -ArgumentList @(
-    "-m", "danmakustudio.gui"
+    "-m", "livedanmaku.gui"
 )

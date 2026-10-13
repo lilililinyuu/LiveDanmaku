@@ -1,7 +1,7 @@
 """YouTube 直播回放 JSON → 弹幕 XML 转换。
 
 输入为 yt-dlp 导出的 live_chat JSON（JSONL，每条一个 replayChatItemAction），
-输出为 DanmakuStudio 可用的弹幕 XML（含 <e name url> 表情元数据）。
+输出为 LiveDanmaku 可用的弹幕 XML（含 <e name url> 表情元数据）。
 """
 
 from __future__ import annotations

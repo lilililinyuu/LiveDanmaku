@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from danmakustudio.config.models import RecorderParams
-from danmakustudio.core.recorder import (
+from livedanmaku.config.models import RecorderParams
+from livedanmaku.core.recorder import (
     RecordParams,
     RecordSession,
     build_record_command,

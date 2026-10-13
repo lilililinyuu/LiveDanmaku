@@ -2,7 +2,7 @@
 
 import urllib.request
 
-from danmakustudio.render.emoji_fetch import download_emoji
+from livedanmaku.render.emoji_fetch import download_emoji
 
 
 class FakeResponse:

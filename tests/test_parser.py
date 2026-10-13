@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from PySide6.QtGui import QGuiApplication
 
-from danmakustudio.input.event import DanmakuEvent
-from danmakustudio.input.parser import (
+from livedanmaku.input.event import DanmakuEvent
+from livedanmaku.input.parser import (
     align_first_event_time,
     drop_first_events,
     parse_lrc,

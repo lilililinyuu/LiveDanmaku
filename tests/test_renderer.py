@@ -4,12 +4,12 @@
 坐标换算、逐帧清屏、越界裁剪与帧数据输出。
 """
 
-from danmakustudio.config import DEFAULT_CONFIG
-from danmakustudio.input.event import DanmakuEvent
-from danmakustudio.layout.active import ActiveDanmaku
-from danmakustudio.layout.params import LayerParams
-from danmakustudio.render.layout_builder import DanmakuLayoutBuilder
-from danmakustudio.render.renderer import DanmakuRenderer
+from livedanmaku.config import DEFAULT_CONFIG
+from livedanmaku.input.event import DanmakuEvent
+from livedanmaku.layout.active import ActiveDanmaku
+from livedanmaku.layout.params import LayerParams
+from livedanmaku.render.layout_builder import DanmakuLayoutBuilder
+from livedanmaku.render.renderer import DanmakuRenderer
 
 LAYER = LayerParams(layer_x=10, layer_y=0, layer_w=400, layer_h=300)
 

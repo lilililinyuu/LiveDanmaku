@@ -1,4 +1,4 @@
-"""DanmakuStudio 的 Qt 视觉主题。"""
+"""LiveDanmaku 的 Qt 视觉主题。"""
 
 from __future__ import annotations
 
@@ -559,8 +559,8 @@ def create_app_icon() -> QIcon:
 
 def apply_theme(app: QApplication) -> None:
     """在应用级别启用一致的 Fusion 浅色主题。"""
-    app.setApplicationName("DanmakuStudio")
-    app.setApplicationDisplayName("DanmakuStudio")
+    app.setApplicationName("LiveDanmaku")
+    app.setApplicationDisplayName("LiveDanmaku")
     app.setWindowIcon(create_app_icon())
     app.setStyle("Fusion")
     font = QFont("Microsoft YaHei UI", 10)

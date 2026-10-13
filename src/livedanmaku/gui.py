@@ -1,4 +1,4 @@
-"""DanmakuStudio 图形界面兼容入口。"""
+"""LiveDanmaku 图形界面兼容入口。"""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ from .ui.file_picker import (
     FileFolderPickerDialog,
     video_name_filters as _video_name_filters,
 )
-from .ui.main_window import DanmakuStudioWindow
+from .ui.main_window import LiveDanmakuWindow
 from .ui.theme import apply_theme
 from .ui.worker import ANSI_ESCAPE_RE, BatchWorker, QtLogStream
 
 __all__ = [
     "BatchWorker",
-    "DanmakuStudioWindow",
+    "LiveDanmakuWindow",
     "FileFolderPickerDialog",
     "QtLogStream",
     "get_app_dir",
@@ -47,7 +47,7 @@ def main() -> None:
     if not isinstance(app, QApplication):
         app = QApplication(sys.argv)
     apply_theme(app)
-    window = DanmakuStudioWindow()
+    window = LiveDanmakuWindow()
     window.show()
     sys.exit(app.exec())
 

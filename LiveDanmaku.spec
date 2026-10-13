@@ -13,7 +13,7 @@ binaries = []
 binaries += collect_dynamic_libs('PySide6')
 datas += collect_data_files('PySide6')
 
-config_file = project_root / "danmakustudio.yaml"
+config_file = project_root / "livedanmaku.yaml"
 if config_file.exists():
     datas.append((str(config_file), "."))
 
@@ -21,11 +21,11 @@ assets_dir = project_root / "assets"
 if assets_dir.exists():
     datas.append((str(assets_dir), "assets"))
 
-icon_file = project_root / "assets" / "DanmakuStudio.ico"
+icon_file = project_root / "assets" / "LiveDanmaku.ico"
 icon = str(icon_file) if icon_file.exists() else None
 
 a = Analysis(
-    [str(project_root / "src" / "danmakustudio" / "_pyinstaller_gui.py")],
+    [str(project_root / "src" / "livedanmaku" / "_pyinstaller_gui.py")],
     pathex=[str(project_root / "src")],
     binaries=binaries,
     datas=datas,
@@ -50,7 +50,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="DanmakuStudio",
+    name="LiveDanmaku",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -71,5 +71,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="DanmakuStudio",
+    name="LiveDanmaku",
 )

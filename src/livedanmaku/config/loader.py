@@ -35,13 +35,18 @@ def _is_dataclass_type(tp: Any) -> bool:
 # =============================================================================
 
 def _config_search_paths(config_path: str | Path | None = None) -> list[Path]:
-    """生成配置文件的搜索路径列表"""
+    """生成配置文件的搜索路径列表
+
+    兼容旧项目名：找不到 livedanmaku.yaml 时回退读取 danmakustudio.yaml。
+    """
     paths: list[Path] = []
     if config_path is not None:
         paths.append(Path(config_path))
+    paths.append(Path("livedanmaku.yaml"))
     paths.append(Path("danmakustudio.yaml"))
-    user_dir = Path.home() / "danmakustudio.yaml"
+    user_dir = Path.home() / "livedanmaku.yaml"
     paths.append(user_dir)
+    paths.append(Path.home() / "danmakustudio.yaml")
     return paths
 
 

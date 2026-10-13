@@ -12,10 +12,10 @@ import pytest
 from PySide6.QtGui import QFont, QFontMetrics, QImage
 from PySide6.QtWidgets import QApplication
 
-from danmakustudio.config import DEFAULT_CONFIG
-from danmakustudio.input.parser import parse_xml
-from danmakustudio.render.assets import load_image_assets
-from danmakustudio.utils import extract_emoji_names
+from livedanmaku.config import DEFAULT_CONFIG
+from livedanmaku.input.parser import parse_xml
+from livedanmaku.render.assets import load_image_assets
+from livedanmaku.utils import extract_emoji_names
 
 style = DEFAULT_CONFIG.style
 

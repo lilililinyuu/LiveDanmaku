@@ -9,11 +9,11 @@ from collections import deque
 
 import pytest
 
-from danmakustudio.config.models import EncodeMode, EncodeParams, SystemParams
-from danmakustudio.encode import ffmpeg as ffmpeg_module
-from danmakustudio.encode.ffmpeg import FFmpegManager
-from danmakustudio.errors import EncodeError
-from danmakustudio.layout.params import LayerParams
+from livedanmaku.config.models import EncodeMode, EncodeParams, SystemParams
+from livedanmaku.encode import ffmpeg as ffmpeg_module
+from livedanmaku.encode.ffmpeg import FFmpegManager
+from livedanmaku.errors import EncodeError
+from livedanmaku.layout.params import LayerParams
 
 
 def _make_manager(active_pipeline: str = EncodeMode.CPU) -> FFmpegManager:
@@ -252,7 +252,7 @@ def test_cleanup_raises_when_ffmpeg_returns_nonzero():
 
 def test_parse_progress_frame():
     """-progress 输出行解析：frame=N 提取帧数，其余行返回 None。"""
-    from danmakustudio.encode.ffmpeg import FFmpegManager
+    from livedanmaku.encode.ffmpeg import FFmpegManager
 
     assert FFmpegManager._parse_progress_frame("frame=123") == 123
     assert FFmpegManager._parse_progress_frame("frame=0") == 0
@@ -265,7 +265,7 @@ def test_parse_progress_frame():
 def test_progress_updates_encoded_frames(monkeypatch):
     """stderr 进度行（-progress pipe:2）应更新 encoded_frames。"""
 
-    from danmakustudio.encode.ffmpeg import FFmpegManager
+    from livedanmaku.encode.ffmpeg import FFmpegManager
 
     class _FakeStream:
         def __init__(self, text):
@@ -288,7 +288,7 @@ def test_progress_updates_encoded_frames(monkeypatch):
 
     mgr = FFmpegManager("in.mp4", "out.mp4")
     monkeypatch.setattr(
-        "danmakustudio.encode.ffmpeg.subprocess.Popen",
+        "livedanmaku.encode.ffmpeg.subprocess.Popen",
         lambda cmd, **kw: _FakeProc(),
     )
 

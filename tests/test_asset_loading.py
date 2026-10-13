@@ -13,7 +13,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
-from danmakustudio.render.assets import load_image_assets
+from livedanmaku.render.assets import load_image_assets
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EMOJI_DIR = _PROJECT_ROOT / "assets" / "emoji"
@@ -97,7 +97,7 @@ class TestXmlFileIntegrity:
 # 资产加载器集成测试
 class TestAssetLoaderIntegration:
     def test_asset_loader_loads_xml_resources(self, qapp, events):
-        from danmakustudio.render.assets import AssetLoader
+        from livedanmaku.render.assets import AssetLoader
 
         assert len(events) > 0, "parse_xml 未返回任何事件"
 
@@ -123,9 +123,9 @@ class TestAssetLoaderIntegration:
         from PySide6.QtCore import QBuffer, QIODevice
         from PySide6.QtGui import QImage
 
-        from danmakustudio.config.models import EmojiStyle
-        from danmakustudio.input.event import DanmakuEvent
-        from danmakustudio.render.assets import AssetLoader
+        from livedanmaku.config.models import EmojiStyle
+        from livedanmaku.input.event import DanmakuEvent
+        from livedanmaku.render.assets import AssetLoader
 
         # 构造一张真实 PNG 作为"远程图片"
         png_img = QImage(40, 40, QImage.Format.Format_ARGB32)
@@ -152,7 +152,7 @@ class TestAssetLoaderIntegration:
             urllib.request, "urlopen", lambda url, timeout: _Resp(png_bytes)
         )
         monkeypatch.setattr(
-            "danmakustudio.render.emoji_fetch.emoji_cache_dir", lambda: tmp_path
+            "livedanmaku.render.emoji_fetch.emoji_cache_dir", lambda: tmp_path
         )
 
         loader = AssetLoader(emoji_style=EmojiStyle(size_ratio=0.5))

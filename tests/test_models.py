@@ -6,8 +6,8 @@
 import pytest
 from PySide6.QtGui import QColor
 
-from danmakustudio.config import DEFAULT_CONFIG
-from danmakustudio.config.models import (
+from livedanmaku.config import DEFAULT_CONFIG
+from livedanmaku.config.models import (
     AnimationParams,
     EmojiStyle,
     EncodeParams,
@@ -16,10 +16,10 @@ from danmakustudio.config.models import (
     TextStyle,
     apply_style_overrides,
 )
-from danmakustudio.input.event import DanmakuEvent
-from danmakustudio.layout.active import ActiveDanmaku
-from danmakustudio.render.layout_builder import DanmakuLayoutBuilder
-from danmakustudio.render.segments import RenderSegment, TextRow
+from livedanmaku.input.event import DanmakuEvent
+from livedanmaku.layout.active import ActiveDanmaku
+from livedanmaku.render.layout_builder import DanmakuLayoutBuilder
+from livedanmaku.render.segments import RenderSegment, TextRow
 
 style = DEFAULT_CONFIG.style
 
@@ -196,7 +196,7 @@ class TestTextStyle:
     """测试 TextStyle 的默认值与校验。"""
 
     def test_defaults(self):
-        """内置默认样式与仓库 danmakustudio.yaml 保持一致。"""
+        """内置默认样式与仓库 livedanmaku.yaml 保持一致。"""
         ts = DEFAULT_CONFIG.style.text
         assert ts.color == "#FFFFFF"
         assert ts.opacity == 0.7

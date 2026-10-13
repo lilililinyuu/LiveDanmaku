@@ -17,7 +17,7 @@ _DEFAULT_TIMEOUT = 15.0
 
 def emoji_cache_dir() -> Path:
     """表情图片的磁盘缓存目录（用户目录）。"""
-    return Path.home() / ".danmakustudio_emoji_cache"
+    return Path.home() / ".livedanmaku_emoji_cache"
 
 
 def download_emoji(name: str, url: str, cache_dir: Path | None = None) -> Path | None:

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from danmakustudio.input.chat2xml import convert_chat_json
-from danmakustudio.input.parser import parse_subtitle_with_emoji
+from livedanmaku.input.chat2xml import convert_chat_json
+from livedanmaku.input.parser import parse_subtitle_with_emoji
 
 
 def _replay_line(usec, author, runs, member=False):
@@ -106,7 +106,7 @@ def test_default_xml_path_for_strips_live_chat():
     """yt-dlp 的 xxx.live_chat.json 应映射为 xxx.xml；普通 json 原后缀替换。"""
     from pathlib import Path
 
-    from danmakustudio.input.chat2xml import default_xml_path_for
+    from livedanmaku.input.chat2xml import default_xml_path_for
 
     assert default_xml_path_for("a/直播.live_chat.json") == Path("a/直播.xml")
     assert default_xml_path_for("a/chat.json") == Path("a/chat.xml")
@@ -147,7 +147,7 @@ def test_convert_chat_json_drop_first_too_many(tmp_path):
 
 def test_preview_json_events(tmp_path):
     """preview_json_events 应返回相对时间排序的前 limit 条消息。"""
-    from danmakustudio.input.chat2xml import preview_json_events
+    from livedanmaku.input.chat2xml import preview_json_events
 
     base = 1753357638681000
     src = tmp_path / "chat.json"
@@ -172,7 +172,7 @@ def test_preview_json_events(tmp_path):
 
 def test_parse_subtitle_with_emoji_json(tmp_path):
     """压制/预览应能直接消费聊天 JSON：事件时间相对首条，表情表齐全。"""
-    from danmakustudio.input.parser import parse_subtitle_with_emoji
+    from livedanmaku.input.parser import parse_subtitle_with_emoji
 
     src = tmp_path / "chat.json"
     src.write_text(
