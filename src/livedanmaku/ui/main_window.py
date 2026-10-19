@@ -426,7 +426,7 @@ class LiveDanmakuWindow(QWidget):
 
         clip_label = QLabel("测试片段")
         clip_label.setObjectName("fieldLabel")
-        options.addWidget(clip_label, 4, 0)
+        options.addWidget(clip_label, 5, 0)
         clip_row = QHBoxLayout()
         clip_row.setSpacing(8)
         self.test_clip_check = CheckMarkCheckBox("只导出测试片段")
@@ -458,11 +458,11 @@ class LiveDanmakuWindow(QWidget):
         clip_row.addWidget(self.clip_start_check)
         clip_row.addWidget(self.clip_start_spin)
         clip_row.addStretch(1)
-        options.addLayout(clip_row, 4, 1)
+        options.addLayout(clip_row, 5, 1)
 
         drop_label = QLabel("删除开头弹幕")
         drop_label.setObjectName("fieldLabel")
-        options.addWidget(drop_label, 5, 0)
+        options.addWidget(drop_label, 6, 0)
         drop_row = QHBoxLayout()
         drop_row.setSpacing(8)
         self.drop_first_spin = QSpinBox()
@@ -481,7 +481,7 @@ class LiveDanmakuWindow(QWidget):
         drop_row.addWidget(self.drop_first_spin)
         drop_row.addWidget(self.btn_drop_reference)
         drop_row.addStretch(1)
-        options.addLayout(drop_row, 5, 1)
+        options.addLayout(drop_row, 6, 1)
 
         settings_layout.addLayout(options)
 
