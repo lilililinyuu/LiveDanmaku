@@ -118,13 +118,12 @@ class TestAssetLoaderIntegration:
 
     def test_asset_loader_downloads_remote_emoji(self, qapp, monkeypatch, tmp_path):
         """本地 assets 缺失的表情应按 <e> 提供的 URL 下载并进入缓存。"""
-        import urllib.request
-
         from PySide6.QtCore import QBuffer, QIODevice
         from PySide6.QtGui import QImage
 
         from livedanmaku.config.models import EmojiStyle
         from livedanmaku.input.event import DanmakuEvent
+        from livedanmaku.render import emoji_fetch
         from livedanmaku.render.assets import AssetLoader
 
         # 构造一张真实 PNG 作为"远程图片"
@@ -149,7 +148,7 @@ class TestAssetLoaderIntegration:
                 return False
 
         monkeypatch.setattr(
-            urllib.request, "urlopen", lambda url, timeout: _Resp(png_bytes)
+            emoji_fetch, "_open_url", lambda url, timeout: _Resp(png_bytes)
         )
         monkeypatch.setattr(
             "livedanmaku.render.emoji_fetch.emoji_cache_dir", lambda: tmp_path
@@ -157,7 +156,7 @@ class TestAssetLoaderIntegration:
 
         loader = AssetLoader(emoji_style=EmojiStyle(size_ratio=0.5))
         events = [DanmakuEvent(time=1.0, user="u", text="你好[remote1]世界")]
-        loader.load_assets(events, {"remote1": "http://example.com/remote1.png"})
+        loader.load_assets(events, {"remote1": "https://yt3.ggpht.com/remote1.png"})
 
         assert "remote1" in loader.emoji_cache
         img = loader.emoji_cache["remote1"]

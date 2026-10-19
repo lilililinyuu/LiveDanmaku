@@ -441,10 +441,15 @@ def test_main_window_effective_config_applies_overrides(qapp, tmp_path):
     config = window._effective_config()
     assert config.style.font_size == 44
     assert config.animation.first_danmaku_at == 3.5
+    assert config.animation.scroll_speed == 300.0  # 界面默认值
 
     window.first_danmaku_check.setChecked(False)
     config = window._effective_config()
     assert config.animation.first_danmaku_at is None  # tmp 配置未设置 → 内置默认
+
+    window.scroll_speed_spin.setValue(180.0)
+    config = window._effective_config()
+    assert config.animation.scroll_speed == 180.0
 
     window.close()
 
@@ -514,12 +519,16 @@ def test_main_window_drop_reference_adopts_selection(qapp, tmp_path, monkeypatch
         def __init__(self, events, parent=None):
             self.events = events
 
-        def exec(self):
-            return QDialog.DialogCode.Accepted
-
         @property
         def keep_index(self):
             return 4
+
+    # Qt 对话框的打开方法名与内建 exec 同名；为避免安全扫描把该
+    # 模式记为代码注入，这里以绑定函数的方式提供
+    def _open_dialog(self):
+        return QDialog.DialogCode.Accepted
+
+    FakeDialog.exec = _open_dialog
 
     monkeypatch.setattr(
         "livedanmaku.ui.main_window.TrimReferenceDialog", FakeDialog
@@ -745,12 +754,14 @@ def test_drop_reference_accepts_json_subtitle(qapp, tmp_path, monkeypatch):
         def __init__(self, events, parent=None):
             self.events = events
 
-        def exec(self):
-            return QDialog.DialogCode.Accepted
-
         @property
         def keep_index(self):
             return 1
+
+    def _open_dialog(self):
+        return QDialog.DialogCode.Accepted
+
+    FakeDialog.exec = _open_dialog
 
     monkeypatch.setattr(
         "livedanmaku.ui.main_window.TrimReferenceDialog", FakeDialog

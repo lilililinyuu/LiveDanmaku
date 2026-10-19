@@ -93,6 +93,7 @@ class BatchWorker(QThread):
         force: bool,
         style_overrides: StyleOverrides | None = None,
         first_danmaku_at: float | None = None,
+        scroll_speed: float | None = None,
         ffmpeg_args: str | None = None,
         test_clip: bool = False,
         clip_duration: float = 60.0,
@@ -108,6 +109,7 @@ class BatchWorker(QThread):
         self.force = force
         self.style_overrides = style_overrides
         self.first_danmaku_at = first_danmaku_at
+        self.scroll_speed = scroll_speed
         self.ffmpeg_args = ffmpeg_args
         self.test_clip = test_clip
         self.clip_duration = clip_duration
@@ -150,6 +152,14 @@ class BatchWorker(QThread):
                     ),
                 )
                 self.log.emit(f"首条弹幕时间: {self.first_danmaku_at} 秒")
+            if self.scroll_speed is not None:
+                config = replace(
+                    config,
+                    animation=replace(
+                        config.animation, scroll_speed=self.scroll_speed
+                    ),
+                )
+                self.log.emit(f"弹幕流速: {self.scroll_speed:g} px/s")
             if self.ffmpeg_args:
                 import shlex
                 config = replace(

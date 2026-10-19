@@ -133,10 +133,15 @@ class AnimationParams:
     仅受 max_text_rows 行数预算限制（单帧溢出时最多延迟一帧）。
     """
     first_danmaku_at: float | None = None  # 第一条弹幕对齐到该视频秒数；None=保持原时间轴
+    # 弹幕水平流速（像素/秒）：越大滚得越快、单条停留时间越短；
+    # 也参与车道分配的相撞计算，改动会影响同屏弹幕的排布
+    scroll_speed: float = 300.0
 
     def __post_init__(self):
         if self.first_danmaku_at is not None and self.first_danmaku_at < 0:
             raise ValueError(f"first_danmaku_at 不能为负数，当前 {self.first_danmaku_at}")
+        if not (0 < self.scroll_speed <= 2000):
+            raise ValueError(f"scroll_speed 必须在 (0, 2000] 范围内，当前 {self.scroll_speed}")
 
 
 @dataclass(frozen=True)

@@ -7,6 +7,7 @@ from lxml import etree
 
 from livedanmaku.input.trim import (
     default_trimmed_path,
+    safe_xml_parser,
     trim_chat_json_file,
     trim_subtitle_xml_file,
 )
@@ -86,7 +87,7 @@ def test_trim_subtitle_xml_file(tmp_path):
 
     assert (removed, kept) == (2, 1)
 
-    root = etree.parse(str(dst)).getroot()
+    root = etree.parse(str(dst), safe_xml_parser()).getroot()
     emojis = root.findall("e")
     ds = root.findall("d")
     assert len(emojis) == 1 and emojis[0].get("name") == "smile"
@@ -106,7 +107,7 @@ def test_trim_subtitle_xml_file_overwrite(tmp_path):
 
     trim_subtitle_xml_file(src, src, 1)
 
-    ds = etree.parse(str(src)).getroot().findall("d")
+    ds = etree.parse(str(src), safe_xml_parser()).getroot().findall("d")
     assert len(ds) == 1 and ds[0].text == "b"
 
 

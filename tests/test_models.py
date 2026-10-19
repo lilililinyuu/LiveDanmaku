@@ -516,6 +516,15 @@ def test_animation_first_danmaku_at_validation():
         AnimationParams(first_danmaku_at=-1.0)
 
 
+def test_animation_scroll_speed_validation():
+    """scroll_speed 默认 300，非正数与超上限应报错。"""
+    assert DEFAULT_CONFIG.animation.scroll_speed == 300.0
+    assert AnimationParams(scroll_speed=150.5).scroll_speed == 150.5
+    for bad in (0.0, -1.0, 2000.1):
+        with pytest.raises(ValueError):
+            AnimationParams(scroll_speed=bad)
+
+
 def test_encode_qsv_vendor_id_default_and_validation():
     """qsv_vendor_id 默认钉定 Intel (0x8086)，负数应报错。"""
     assert EncodeParams().qsv_vendor_id == 0x8086

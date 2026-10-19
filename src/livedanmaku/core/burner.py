@@ -250,7 +250,7 @@ class DanmakuBurner:
         progress_log_interval = 5.0
         progress_callback_interval = 0.5
 
-        scroll_speed = 300
+        scroll_speed = float(self._config.animation.scroll_speed)
         row_height, top_margin, effective_rows = danmaku_layout_context(
             self._config, self._asset_provider, video_width,
             layer_params.layer_h + self._config.ratio.bottom_margin,

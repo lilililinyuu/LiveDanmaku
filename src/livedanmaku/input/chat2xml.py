@@ -264,6 +264,14 @@ def convert_chat_json(
     """
     if drop_first < 0:
         raise ValueError(f"删除条数不能为负数，当前 {drop_first}")
+    json_path = Path(json_path).resolve()
+    xml_path = Path(xml_path).resolve()
+    # 纵深防御断言：resolve() 已消除 .. 段，此处再显式校验一次
+    for label, p in (("输入文件", json_path), ("输出文件", xml_path)):
+        if ".." in p.parts:
+            raise ValueError(f"{label}路径包含非法的 .. 段: {p}")
+    if not json_path.is_file():
+        raise ValueError(f"聊天 JSON 文件不存在: {json_path}")
     data_entries = _extract_chat_entries(json_path)
     if not data_entries:
         raise ValueError("未提取到任何弹幕消息")
@@ -306,6 +314,7 @@ def convert_chat_json(
         )
 
     xml_lines.append("</i>")
+    xml_path.parent.mkdir(parents=True, exist_ok=True)
     with open(xml_path, "w", encoding="utf-8") as f:
         f.write("\n".join(xml_lines))
 

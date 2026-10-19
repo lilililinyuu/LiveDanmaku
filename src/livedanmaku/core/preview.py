@@ -23,8 +23,6 @@ from ..layout.engine import LayoutContext, LayoutEngine
 from ..render.assets import AssetLoader
 from .burner import danmaku_layout_context, danmaku_state_at
 
-_SCROLL_SPEED = 300.0
-
 
 def extract_video_frame(video_in: str, time_sec: float) -> QImage | None:
     """用 ffmpeg 抽取视频在指定时间点的一帧（PNG 字节流）。"""
@@ -88,7 +86,8 @@ def render_preview_frame(
     ctx = LayoutContext()
     active = danmaku_state_at(
         pool, t, fps, ctx, asset_provider,
-        effective_rows, w, row_height, top_margin, _SCROLL_SPEED,
+        effective_rows, w, row_height, top_margin,
+        float(config.animation.scroll_speed),
     )
     visible = [dm for dm in active if 0 <= dm.x < w and dm.x + dm.total_width > 0]
     if not visible:

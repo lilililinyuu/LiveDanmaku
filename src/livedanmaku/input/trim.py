@@ -18,6 +18,22 @@ from loguru import logger
 from lxml import etree
 
 
+def safe_xml_parser() -> etree.XMLParser:
+    """禁用外部实体与网络加载的 XML 解析器。
+
+    弹幕 XML 不需要 DTD/实体：来自第三方工具的字幕文件不可信，
+    关闭实体解析可杜绝 XXE（外部实体读本地文件/网络请求）类攻击。
+    """
+    return etree.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        load_dtd=False,
+        dtd_validation=False,
+        attribute_defaults=False,
+        huge_tree=False,
+    )
+
+
 def default_trimmed_path(src: Path, drop_first: int) -> Path:
     """生成新文件模式下的默认输出路径：`原名-删开头N条.扩展名`。
 
@@ -41,6 +57,14 @@ def trim_chat_json_file(src: Path, dst: Path, drop_first: int) -> tuple[int, int
     if drop_first < 0:
         raise ValueError(f"删除条数不能为负数，当前 {drop_first}")
 
+    src = Path(src).resolve()
+    dst = Path(dst).resolve()
+    # 纵深防御断言：resolve() 已消除 .. 段，此处再显式校验一次
+    for label, p in (("源文件", src), ("目标文件", dst)):
+        if ".." in p.parts:
+            raise ValueError(f"{label}路径包含非法的 .. 段: {p}")
+    if not src.is_file():
+        raise ValueError(f"弹幕文件不存在: {src}")
     total = _count_chat_messages(src)
     if drop_first >= total:
         raise ValueError(
@@ -92,7 +116,11 @@ def trim_subtitle_xml_file(src: Path, dst: Path, drop_first: int) -> tuple[int, 
     if drop_first < 0:
         raise ValueError(f"删除条数不能为负数，当前 {drop_first}")
 
-    tree = etree.parse(str(src))
+    # 弹幕 XML 不需要 DTD/实体：禁用外部实体解析（防 XXE 读本地文件）
+    safe_parser = etree.XMLParser(
+        resolve_entities=False, no_network=True, load_dtd=False
+    )
+    tree = etree.parse(str(src), safe_parser)
     root = tree.getroot()
     danmakus = root.findall("d")
     if drop_first >= len(danmakus):

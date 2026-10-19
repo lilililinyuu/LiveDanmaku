@@ -42,3 +42,7 @@ src.bak/
 /*.part-Frag*
 /*.part
 /已保存/
+
+# Mimosa 安全扫描本地状态
+.mimosa/
+.video_agent/

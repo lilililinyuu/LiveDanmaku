@@ -394,16 +394,35 @@ class LiveDanmakuWindow(QWidget):
         first_row.addStretch(1)
         options.addLayout(first_row, 2, 1)
 
+        speed_label = QLabel("弹幕流速")
+        speed_label.setObjectName("fieldLabel")
+        options.addWidget(speed_label, 3, 0)
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(8)
+        self.scroll_speed_spin = QDoubleSpinBox()
+        self.scroll_speed_spin.setRange(50.0, 1000.0)
+        self.scroll_speed_spin.setSingleStep(10.0)
+        self.scroll_speed_spin.setDecimals(0)
+        self.scroll_speed_spin.setValue(300.0)
+        self.scroll_speed_spin.setSuffix(" px/s")
+        self.scroll_speed_spin.setToolTip(
+            "弹幕从右向左的滚动速度（像素/秒）。越大滚得越快、单条弹幕停留越短；\n"
+            "同时影响车道分配的相撞计算。默认 300。"
+        )
+        speed_row.addWidget(self.scroll_speed_spin)
+        speed_row.addStretch(1)
+        options.addLayout(speed_row, 3, 1)
+
         ffmpeg_label = QLabel("自定义参数")
         ffmpeg_label.setObjectName("fieldLabel")
-        options.addWidget(ffmpeg_label, 3, 0)
+        options.addWidget(ffmpeg_label, 4, 0)
         self.ffmpeg_args_edit = QLineEdit()
         self.ffmpeg_args_edit.setPlaceholderText('例如 -maxrate 4M -bufsize 8M（追加在 ffmpeg 命令末尾）')
         self.ffmpeg_args_edit.setClearButtonEnabled(True)
         self.ffmpeg_args_edit.setToolTip(
             "自定义 ffmpeg 压缩参数，追加在命令末尾可覆盖默认压缩设置。"
         )
-        options.addWidget(self.ffmpeg_args_edit, 3, 1)
+        options.addWidget(self.ffmpeg_args_edit, 4, 1)
 
         clip_label = QLabel("测试片段")
         clip_label.setObjectName("fieldLabel")
@@ -1332,6 +1351,13 @@ class LiveDanmakuWindow(QWidget):
                     first_danmaku_at=self.first_danmaku_spin.value(),
                 ),
             )
+        config = replace(
+            config,
+            animation=replace(
+                config.animation,
+                scroll_speed=self.scroll_speed_spin.value(),
+            ),
+        )
         return config
 
     def save_style_to_yaml(self) -> None:
@@ -1835,6 +1861,7 @@ class LiveDanmakuWindow(QWidget):
             lines.append(f"首条弹幕时间：{self.first_danmaku_spin.value():g} 秒")
         else:
             lines.append("首条弹幕时间：不调整")
+        lines.append(f"弹幕流速：{self.scroll_speed_spin.value():g} px/s")
         drop_first = int(self.drop_first_spin.value())
         lines.append(
             f"删除开头弹幕：前 {drop_first} 条" if drop_first else "删除开头弹幕：不删除"
@@ -1897,6 +1924,7 @@ class LiveDanmakuWindow(QWidget):
             force=self.force_checkbox.isChecked(),
             style_overrides=self.style_panel.style_overrides(),
             first_danmaku_at=first_danmaku_at,
+            scroll_speed=self.scroll_speed_spin.value(),
             ffmpeg_args=self.ffmpeg_args_edit.text().strip() or None,
             test_clip=test_clip,
             clip_duration=self.clip_duration_spin.value(),
