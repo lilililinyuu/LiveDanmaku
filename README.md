@@ -479,4 +479,4 @@ LiveDanmaku/
 
 ## 致谢
 
-本项目基于 [febr30th/LiveDanmaku](https://github.com/febr30th/LiveDanmaku) 修改，感谢原项目作者的弹幕渲染与压制实现。
+本项目基于 [febr30th/DanmakuStudio](https://github.com/febr30th/DanmakuStudio) 修改，感谢原项目作者的弹幕渲染与压制实现。
