@@ -40,7 +40,11 @@ __all__ = [
 
 def main() -> None:
     from .logger_config import configure_logger
+    from .utils.helpers import prepend_venv_scripts_to_path
 
+    # pip 装进 venv 的 yt-dlp 需要让子进程按裸名找到（pythonw 启动时
+    # venv Scripts 不在继承的 PATH 里）
+    prepend_venv_scripts_to_path()
     # 尽早初始化日志（pythonw / 窗口模式下无控制台，落文件排障）
     configure_logger()
     app = QApplication.instance()

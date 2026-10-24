@@ -39,6 +39,40 @@ def test_parse_ytdlp_paths_same_name_json():
     assert chat.stem == video.stem
 
 
+def test_parse_ytdlp_paths_ignores_log_lines():
+    """yt-dlp 日志行（如 [info] Writing video subtitles to: …）以 .json
+    结尾时不得被当成路径——此前会把整行日志当弹幕路径返回，GUI 按
+    该"路径"读文件报 Errno 22。日志行应被跳过，交给目录扫描回退。"""
+    video, chat = parse_ytdlp_paths([
+        "[download] Destination: C:\\work\\v.f137.mp4",
+        "[info] Writing video subtitles to: C:\\work\\v.live_chat.json",
+        "[Merger] Merging formats into \"C:\\work\\v.mp4\"",
+        r"C:\work\v.f137.mp4",
+        r"C:\work\v.mp4",
+    ])
+    assert video is not None and video.name == "v.f137.mp4"
+    assert chat is None
+
+
+def test_parse_ytdlp_paths_filename_with_bracket_prefix():
+    """真实文件名以 [生肉] 等 CJK 括号开头时应正常识别（非日志行）。"""
+    video, chat = parse_ytdlp_paths([
+        r"C:\work\[生肉]某视频.mp4",
+        r"C:\work\[生肉]某视频.live_chat.json",
+    ])
+    assert video is not None and video.suffix == ".mp4"
+    assert chat is not None and ".live_chat" in chat.name
+
+
+def test_parse_ytdlp_paths_prefers_live_chat():
+    _video, chat = parse_ytdlp_paths([
+        r"C:\work\v.mp4",
+        r"C:\work\v.json",
+        r"C:\work\v.live_chat.json",
+    ])
+    assert chat is not None and ".live_chat" in chat.name
+
+
 def test_download_items_no_selection():
     with pytest.raises(LiveDanmakuError, match="未选择"):
         download_items(

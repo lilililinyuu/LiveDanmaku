@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$Python = "",
-    [string]$Venv = ".venv"
+    [string]$Venv = ".venv",
+    # 系统 PATH 上已有 yt-dlp 时可加此开关，跳过把 yt-dlp 装进 venv；
+    # GUI 找不到 venv 内的 yt-dlp 会自动回退调用系统 PATH 上的版本
+    [switch]$NoDownload
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,9 +25,15 @@ Invoke-CheckedCommand -FilePath $VenvPython -ArgumentList @(
     "-m", "pip", "install", "--upgrade", "pip"
 )
 
+$installTarget = ".[download]"
+if ($NoDownload) {
+    $installTarget = "."
+    Write-Host "NoDownload: skipping yt-dlp; the system PATH yt-dlp will be used."
+}
+
 Write-Host "Installing LiveDanmaku and development dependencies..."
 Invoke-CheckedCommand -FilePath $VenvPython -ArgumentList @(
-    "-m", "pip", "install", "--editable", ".", "--group", "dev"
+    "-m", "pip", "install", "--editable", $installTarget, "--group", "dev"
 )
 
 Write-Host "Checking runtime and GUI imports..."

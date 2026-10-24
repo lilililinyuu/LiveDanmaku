@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 function Invoke-CheckedCommand {
@@ -81,12 +81,12 @@ function Resolve-PythonCommand {
             continue
         }
 
-        if ($candidateVersion -ge [Version]"3.13") {
+        if ($candidateVersion -ge [Version]"3.12") {
             return $candidate
         }
     }
 
-    throw "Python 3.13 or newer was not found. Install it from python.org or pass -Python with the full path to python.exe."
+    throw "Python 3.12 or newer was not found. Install it from python.org or pass -Python with the full path to python.exe."
 }
 
 function Assert-SupportedPython {
@@ -111,8 +111,8 @@ function Assert-SupportedPython {
         throw "Unable to parse Python version: $versionText"
     }
 
-    if ($version -lt [Version]"3.13") {
-        throw "LiveDanmaku requires Python 3.13 or newer; found $versionText"
+    if ($version -lt [Version]"3.12") {
+        throw "LiveDanmaku requires Python 3.12 or newer; found $versionText"
     }
 
     Write-Host "Using Python $versionText"

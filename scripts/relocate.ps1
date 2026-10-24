@@ -65,6 +65,10 @@ Write-Host "安装项目（editable）..."
 & $venvPython -m pip install --disable-pip-version-check -q -e . --no-deps
 if ($LASTEXITCODE -ne 0) { Write-Host "项目安装失败" -ForegroundColor Red; exit 1 }
 
+Write-Host "安装 yt-dlp（下载/录制页依赖）..."
+& $venvPython -m pip install --disable-pip-version-check -q "yt-dlp>=2024.12.13"
+if ($LASTEXITCODE -ne 0) { Write-Host "yt-dlp 安装失败（可稍后手动 pip install yt-dlp）" -ForegroundColor Yellow }
+
 Write-Host "验证导入..."
 & $venvPython -c "import livedanmaku, livedanmaku.gui"
 if ($LASTEXITCODE -ne 0) { Write-Host "验证失败" -ForegroundColor Red; exit 1 }

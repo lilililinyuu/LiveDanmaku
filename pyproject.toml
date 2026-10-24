@@ -1,9 +1,9 @@
 [project]
 name = "livedanmaku"
 version = "0.1.0"
-description = "图形化弹幕/LRC 批量压制工具"
+description = "LiveDanmaku 直播弹幕工坊：YouTube 直播录制/下载 + 弹幕转换分析 + 弹幕压制烧录一体化图形工具"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "loguru>=0.7.3",
     "lxml>=6.1.1",
@@ -11,6 +11,11 @@ dependencies = [
     "pyyaml>=6.0",
     "tqdm>=4.67.3",
 ]
+
+[project.optional-dependencies]
+# 下载 / 直播录制页依赖 yt-dlp（纯 Python，pip 直接装进 venv，
+# GUI 启动时自动把 venv Scripts 前置到 PATH，无需手工配置）
+download = ["yt-dlp>=2024.12.13"]
 
 [project.scripts]
 livedanmaku = "livedanmaku.cli:main"

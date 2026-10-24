@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -19,6 +20,9 @@ _PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "all_proxy")
 _VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".flv", ".mov", ".ts", ".avi")
 _IMAGE_EXTS = (".webp", ".jpg", ".jpeg", ".png", ".avif", ".jfif", ".gif")
 _YTDLP_FORMAT = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
+
+# yt-dlp 日志行前缀：[info] / [download] / [Merger] 等（ASCII 关键字+空格）
+_YTDLP_LOG_LINE_RE = re.compile(r"^\[[A-Za-z_][A-Za-z0-9_.]*\]\s")
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -65,12 +69,17 @@ def parse_ytdlp_paths(lines: list[str]) -> tuple[Path | None, Path | None]:
 
     弹幕 JSON 优先匹配 *.live_chat.json；若输出中只有普通 .json
     （例如弹幕文件与视频同名、仅后缀不同），则接受该 .json。
+
+    yt-dlp 的日志行（`[info] Writing video subtitles to: …` 等）可能
+    以 .json 结尾，必须跳过——否则整行日志会被当成路径返回，后续按
+    该"路径"读文件报 Errno 22。只按 ASCII 前缀（[info]/[download]/
+    [Merger]…）识别日志行，文件名以 [生肉] 之类开头的真实路径不受影响。
     """
     video: Path | None = None
     jsons: list[Path] = []
     for line in lines:
         line = line.strip()
-        if not line:
+        if not line or _YTDLP_LOG_LINE_RE.match(line):
             continue
         path = Path(line)
         if path.suffix.lower() == ".json":

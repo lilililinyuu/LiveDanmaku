@@ -18,6 +18,12 @@ source/
 logs/
 other/
 assets/
+# 例外：样式面板预览用的表情素材必须入库（其余 assets 为用户私有素材，不上传）
+!assets/
+assets/emoji/*
+!assets/emoji/_LOVEラブ.png
+!assets/emoji/_nagi凪.png
+!assets/emoji/_ペンライト.png
 output*.mp4
 *.log
 
