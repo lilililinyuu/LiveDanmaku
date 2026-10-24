@@ -52,3 +52,4 @@ src.bak/
 # Mimosa 安全扫描本地状态
 .mimosa/
 .video_agent/
+/livedanmaku.yaml

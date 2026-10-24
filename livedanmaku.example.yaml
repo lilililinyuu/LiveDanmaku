@@ -1,0 +1,64 @@
+# LiveDanmaku 配置模板
+# 用法：把本文件复制为 livedanmaku.yaml 后按需修改；不复制则全部使用内置默认值。
+# 各字段含义见 README「配置」章节。
+style:
+  danmaku_x: 20
+  row_vertical_gap: 1
+  multiline_row_gap: 1
+  font_family: "Microsoft YaHei"
+  font_size: 25
+  text:
+    color: "#FFFFFF"
+    opacity: 0.7
+    outline_color: "#246542"
+    outline_width: 0.7
+    shadow_color: "#000000"
+    shadow_opacity: 0.7
+  member_text:
+    color: "#45dd7f"
+    opacity: 0.7
+    outline_color: "#246542"
+    outline_width: 0.7
+    shadow_color: "#000000"
+    shadow_opacity: 0.7
+  emoji:
+    opacity: 1.0
+    size_ratio: 1.0
+    spacing: 4
+  render_scale: 1.0
+ratio:
+  max_text_rows: 4
+  text_width_ratio: 0.8
+  top_margin: 12
+  bottom_margin: 22
+animation:
+  first_danmaku_at: null
+  scroll_speed: 300
+encode:
+  gpu_preset: p5
+  gpu_cq: 15
+  qsv_preset: slow
+  qsv_quality: 18
+  qsv_vendor_id: 0x8086
+  cpu_preset: medium
+  cpu_crf: 18
+  cpu_min_reserve_threads: 2
+  extra_args: []
+system:
+  pipe_buffer_size: 10000000
+  pipe_queue_size: 16
+  ffmpeg_timeout: 10
+  stderr_thread_timeout: 5
+  video_alignment: 2
+  max_queue_frames: 64
+recorder:
+  proxy: ""
+  download_proxy: ""
+  pot_token_script: ""
+  fmt: "bestvideo+bestaudio/best"
+  output_template: "%(upload_date)s_%(title)s.%(ext)s"
+  live_from_start: true
+  record_chat: true
+  monitor_interval: 60.0
+  sync_mode: auto
+  av_offset: 0.0

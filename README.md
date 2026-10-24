@@ -82,8 +82,7 @@ python --version    # 应显示 3.12.x 或更高
 **第 2 步：获取代码**
 
 ```bash
-# 把 <你的用户名> 换成实际上传该仓库的 GitHub 账号
-git clone https://github.com/<你的用户名>/LiveDanmaku.git
+git clone https://github.com/lilililinyuu/LiveDanmaku.git
 cd LiveDanmaku
 ```
 
@@ -98,7 +97,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 见下文[外部依赖怎么处理](#外部依赖怎么处理上传-github-后他人如何立即使用)，
 推荐 `winget install --id Gyan.FFmpeg -e`，装完重开终端 `ffmpeg -version` 验证。
 
-**第 5 步：启动**
+**第 5 步（可选）：创建个人配置** —— 复制模板后按需修改（不复制则全部用内置默认值）：
+
+```powershell
+copy livedanmaku.example.yaml livedanmaku.yaml
+```
+
+**第 6 步：启动**
 
 ```powershell
 # 日常：双击项目根目录的 启动GUI.bat（无控制台黑窗）
@@ -106,7 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\run_gui.ps1
 ```
 
-**第 6 步（可选）：验证安装** —— 跑一遍测试套件（257+ 用例，约 1 分钟）：
+**第 7 步（可选）：验证安装** —— 跑一遍测试套件（257+ 用例，约 1 分钟）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
@@ -274,22 +279,23 @@ livedanmaku-gui                                                      # 已 pip i
 
 录制相关默认参数（代理、PO Token 路径、格式、探测间隔等）在配置文件的 `recorder:` 段调整。弹幕说明：录制中的弹幕 JSON 只能实时捕获「开始录制之后」的发言；录制结束后程序会自动下载 YouTube 的整场弹幕回放并替换（从直播第一秒开始）。停止录制时若直播尚未结束，将保留已捕获的部分。「弹幕样式」页的预览卡片提供「渲染精度」（对应配置 `style.render_scale`）：先按倍率放大渲染文字再缩回视频尺寸，>1 时文字边缘更细腻，调整后预览区实时更新效果。
 
-| 参数 | 随项目配置值 | 内置默认值 | 说明 |
-| --- | --- | --- | --- |
-| `proxy` | http://127.0.0.1:7897 | ""（不使用） | 录制/探测代理。注意 ffmpeg 不支持 SOCKS，录制直播必须用 http 形式 |
-| `download_proxy` | http://127.0.0.1:7897 | ""（不使用） | 下载页代理（下载页也可在界面单独填） |
-| `pot_token_script` | D:/youtube-video-download/bgutil-pot.exe | ""（不使用） | bgutil-pot 脚本/可执行文件路径，经 --extractor-args 传入；遇 YouTube 发质询时需要 |
-| `fmt` | bestvideo+bestaudio/best | 同左 | 录制格式：优先音视频分离流并在结束时合并，直播无双流时回退单文件 |
-| `output_template` | %(upload_date)s_%(title)s.%(ext)s | 同左 | 输出文件名模板 |
-| `live_from_start` | true | true | true=用 --live-from-start 从直播开头录制（DVR 回放追帧，不支持时 yt-dlp 自动忽略）；false=从当前直播位置实时录制 |
-| `record_chat` | true | true | 同步录制弹幕 JSON |
-| `monitor_interval` | 60.0 | 60.0 | 频道开播探测间隔（秒） |
-| `sync_mode` | auto | auto | 音画同步整理方式：auto=流拷贝重封装（秒级）；exact=精确同步，重编码并重算时间戳（修正累积漂移，整理耗时与录制时长相当） |
-| `av_offset` | 0.0 | 0.0 | 音画补偿秒数：整理时平移音频流（>0 音频延后）。录制的文件音频比视频快 N 秒时填 +N |
+| 参数 | 内置默认值 | 说明 |
+| --- | --- | --- |
+| `proxy` | ""（不使用） | 录制/探测代理。注意 ffmpeg 不支持 SOCKS，录制直播必须用 http 形式 |
+| `download_proxy` | ""（不使用） | 下载页代理（下载页也可在界面单独填） |
+| `pot_token_script` | ""（不使用） | bgutil-pot 脚本/可执行文件路径，经 --extractor-args 传入；遇 YouTube 发质询时需要 |
+| `fmt` | 同左 | 录制格式：优先音视频分离流并在结束时合并，直播无双流时回退单文件 |
+| `output_template` | 同左 | 输出文件名模板 |
+| `live_from_start` | true | true=用 --live-from-start 从直播开头录制（DVR 回放追帧，不支持时 yt-dlp 自动忽略）；false=从当前直播位置实时录制 |
+| `record_chat` | true | 同步录制弹幕 JSON |
+| `monitor_interval` | 60.0 | 频道开播探测间隔（秒） |
+| `sync_mode` | auto | 音画同步整理方式：auto=流拷贝重封装（秒级）；exact=精确同步，重编码并重算时间戳（修正累积漂移，整理耗时与录制时长相当） |
+| `av_offset` | 0.0 | 音画补偿秒数：整理时平移音频流（>0 音频延后）。录制的文件音频比视频快 N 秒时填 +N |
 
 ## 配置
 
-通过 `livedanmaku.yaml` 调整行为。
+通过 `livedanmaku.yaml` 调整行为。仓库提供模板 `livedanmaku.example.yaml`：
+复制为 `livedanmaku.yaml` 后按需修改；不创建该文件则全部使用内置默认值。
 
 配置优先级：
 
@@ -301,61 +307,61 @@ livedanmaku-gui                                                      # 已 pip i
 
 EXE 运行时，图形界面会优先使用 exe 同目录下的 `livedanmaku.yaml`，用户可以直接编辑；也可以在界面「保存样式到 YAML…」中把当前样式写出为新配置。
 
-下表中，“随项目配置值”来自当前仓库中的 `livedanmaku.yaml`；删除该文件或删除某个字段后，对应字段会回退到“内置默认值”。
+下表为各参数的内置默认值与说明。
 
 ### 布局样式 (style)
 
-| 参数                    | 随项目配置值 | 内置默认值 | 说明                    |
-| --------------------- | ------ | ----- | --------------------- |
-| `danmaku_x`           | 0      | 20    | 弹幕起始 X 坐标（像素）         |
-| `layer_width_extra`   | 100    | 100   | 已废弃：渲染层始终延伸至视频最右端，保留仅为兼容旧配置 |
-| `row_vertical_gap`    | 1      | 1     | 弹幕行之间的垂直间距（像素）       |
-| `multiline_row_gap`   | 1      | 1     | 多行文本行间距（像素）           |
-| `font_family`         | "思源黑体 Heavy" | "Microsoft YaHei" | 字体类型，置于回退链最前，空=仅内置字体族 |
-| `font_size`           | 36     | 25    | 字体大小（pt），全局共用         |
+| 参数                    | 内置默认值 | 说明                    |
+| --------------------- | ----- | --------------------- |
+| `danmaku_x`           | 20    | 弹幕起始 X 坐标（像素）         |
+| `layer_width_extra`   | 100   | 已废弃：渲染层始终延伸至视频最右端，保留仅为兼容旧配置 |
+| `row_vertical_gap`    | 1     | 弹幕行之间的垂直间距（像素）       |
+| `multiline_row_gap`   | 1     | 多行文本行间距（像素）           |
+| `font_family`         | "Microsoft YaHei" | 字体类型，置于回退链最前，空=仅内置字体族 |
+| `font_size`           | 25    | 字体大小（pt），全局共用         |
 
 `text` 与 `member_text` 分别为普通用户与会员的文本样式，结构相同、可分开调整：
 
-| 参数               | text 随项目值 | member_text 随项目值 | 内置默认值 | 说明                     |
-| ---------------- | -------- | ---------------- | ----- | ---------------------- |
-| `color`          | "#FFFFFF" | "#50ff8d"       | "#FFFFFF" / "#45dd7f" | 字体颜色                  |
-| `opacity`        | 0.45      | 0.45             | 0.7   | 文本不透明度（含描边）0~1         |
-| `outline_color`  | "#000000" | "#246542"      | "#246542" | 描边颜色，空字符串表示禁用      |
-| `outline_width`  | 1.0      | 1.0            | 0.7   | 描边厚度（像素，可为小数），0 表示禁用    |
-| `shadow_color`   | "#282828" | "#000000"     | "#000000" | 阴影颜色，空字符串表示禁用      |
-| `shadow_opacity` | 0.45      | 0.45            | 0.7   | 阴影不透明度 0~1             |
+| 参数               | 内置默认值 | 说明                     |
+| ---------------- | ----- | ---------------------- |
+| `color`          | "#FFFFFF" / "#45dd7f" | 字体颜色                  |
+| `opacity`        | 0.7   | 文本不透明度（含描边）0~1         |
+| `outline_color`  | "#246542" | 描边颜色，空字符串表示禁用      |
+| `outline_width`  | 0.7   | 描边厚度（像素，可为小数），0 表示禁用    |
+| `shadow_color`   | "#000000" | 阴影颜色，空字符串表示禁用      |
+| `shadow_opacity` | 0.7   | 阴影不透明度 0~1             |
 
 阴影偏移固定为右下 2 像素；阴影会在弹幕缓存图右/下边缘处被轻微裁剪。
 
 `emoji` 为表情样式（普通与会员共用）：
 
-| 参数            | 随项目配置值 | 内置默认值 | 说明                    |
-| ------------- | ------ | ----- | --------------------- |
-| `opacity`     | 0.9    | 1.0   | 表情不透明度 0~1            |
-| `size_ratio`  | 1.0    | 1.0   | 表情大小比例（相对行高），1.0=与行高一致 |
-| `spacing`     | 4      | 4     | 表情间距（像素）              |
+| 参数            | 内置默认值 | 说明                    |
+| ------------- | ----- | --------------------- |
+| `opacity`     | 1.0   | 表情不透明度 0~1            |
+| `size_ratio`  | 1.0   | 表情大小比例（相对行高），1.0=与行高一致 |
+| `spacing`     | 4     | 表情间距（像素）              |
 
 `render_scale` 为渲染超采样倍率（样式页预览卡片可调）：
 
-| 参数             | 随项目配置值 | 内置默认值 | 说明 |
-| -------------- | ------ | ----- | --- |
-| `render_scale` | 1.0    | 1.0   | 弹幕渲染超采样倍率（1.0~4.0）：先放大渲染文字再缩回视频尺寸，>1 时文字边缘更细腻，内存/CPU 占用略增 |
+| 参数             | 内置默认值 | 说明 |
+| -------------- | ----- | --- |
+| `render_scale` | 1.0   | 弹幕渲染超采样倍率（1.0~4.0）：先放大渲染文字再缩回视频尺寸，>1 时文字边缘更细腻，内存/CPU 占用略增 |
 
 ### 布局比例 (ratio)
 
-| 参数                 | 随项目配置值 | 内置默认值 | 说明         |
-| ------------------ | ------ | ----- | ---------- |
-| `max_text_rows`    | 20     | 4     | 文本弹幕最多显示行数（自动按可见高度钳制） |
-| `text_width_ratio` | 0.8    | 0.8   | 文本弹幕最大宽度比例 |
-| `top_margin`       | 12     | 12    | 顶部边距（像素），弹幕不会贴住画面上边缘 |
-| `bottom_margin`    | 500    | 22    | 底部边距（像素）   |
+| 参数                 | 内置默认值 | 说明         |
+| ------------------ | ----- | ---------- |
+| `max_text_rows`    | 4     | 文本弹幕最多显示行数（自动按可见高度钳制） |
+| `text_width_ratio` | 0.8   | 文本弹幕最大宽度比例 |
+| `top_margin`       | 12    | 顶部边距（像素），弹幕不会贴住画面上边缘 |
+| `bottom_margin`    | 22    | 底部边距（像素）   |
 
 ### 动画参数 (animation)
 
-| 参数                      | 随项目配置值 | 内置默认值 | 说明            |
-| ----------------------- | ------ | ----- | ------------- |
-| `first_danmaku_at`     | 0      | null  | 第一条弹幕对齐到该秒（0=视频一开始就出现）；null=保持字幕文件原时间轴 |
-| `scroll_speed`          | —（未设置） | 300   | 弹幕水平流速（像素/秒）；越大滚得越快、单条停留越短，也影响车道分配的相撞计算。取值 (0, 2000] |
+| 参数                      | 内置默认值 | 说明            |
+| ----------------------- | ----- | ------------- |
+| `first_danmaku_at`     | null  | 第一条弹幕对齐到该秒（0=视频一开始就出现）；null=保持字幕文件原时间轴 |
+| `scroll_speed`          | 300   | 弹幕水平流速（像素/秒）；越大滚得越快、单条停留越短，也影响车道分配的相撞计算。取值 (0, 2000] |
 
 弹幕严格按字幕文件中的原始时间出现（无发射间隔/批次节流）；单帧行数超出 `max_text_rows` 时按行数预算顺延，最多延迟一帧。
 
@@ -363,17 +369,17 @@ EXE 运行时，图形界面会优先使用 exe 同目录下的 `livedanmaku.yam
 
 ### 编码参数 (encode)
 
-| 参数                        | 随项目配置值 | 内置默认值    | 说明                                 |
-| ------------------------- | ------ | -------- | ---------------------------------- |
-| `gpu_preset`              | "p5"     | "p5"     | NVIDIA NVENC 预设（p1~p7，越大越慢、质量越好）   |
-| `gpu_cq`                  | 15       | 15       | NVIDIA NVENC QP 质量（0~51，越小越好、文件越大） |
-| `qsv_preset`              | "slow"   | "slow"   | Intel QSV 预设（越慢通常质量越好）             |
-| `qsv_quality`             | 18       | 18       | Intel QSV 质量（0~51，越小越好、文件越大）       |
-| `qsv_vendor_id`           | 0x8086   | 0x8086   | QSV 绑定的显卡 PCI vendor id；多适配器机器（虚拟显示适配器 + 真实显卡）上把 QSV 会话钉定到真实 Intel 显卡，避免会话落在虚拟适配器上停转；0 = 走 ffmpeg 自动选择 |
-| `cpu_preset`              | "medium" | "medium" | libx264 预设（越慢压缩效率越好）               |
-| `cpu_crf`                 | 18       | 18       | libx264 CRF 质量（0~51，越小越好、文件越大）     |
-| `cpu_min_reserve_threads` | 2        | 2        | CPU 编码保留线程数                        |
-| `extra_args`              | []       | []       | 自定义 ffmpeg 参数列表（追加在命令末尾，可覆盖默认压缩参数） |
+| 参数                        | 内置默认值    | 说明                                 |
+| ------------------------- | -------- | ---------------------------------- |
+| `gpu_preset`              | "p5"     | NVIDIA NVENC 预设（p1~p7，越大越慢、质量越好）   |
+| `gpu_cq`                  | 15       | NVIDIA NVENC QP 质量（0~51，越小越好、文件越大） |
+| `qsv_preset`              | "slow"   | Intel QSV 预设（越慢通常质量越好）             |
+| `qsv_quality`             | 18       | Intel QSV 质量（0~51，越小越好、文件越大）       |
+| `qsv_vendor_id`           | 0x8086   | QSV 绑定的显卡 PCI vendor id；多适配器机器（虚拟显示适配器 + 真实显卡）上把 QSV 会话钉定到真实 Intel 显卡，避免会话落在虚拟适配器上停转；0 = 走 ffmpeg 自动选择 |
+| `cpu_preset`              | "medium" | libx264 预设（越慢压缩效率越好）               |
+| `cpu_crf`                 | 18       | libx264 CRF 质量（0~51，越小越好、文件越大）     |
+| `cpu_min_reserve_threads` | 2        | CPU 编码保留线程数                        |
+| `extra_args`              | []       | 自定义 ffmpeg 参数列表（追加在命令末尾，可覆盖默认压缩参数） |
 
 示例：
 
@@ -384,14 +390,14 @@ encode:
 
 ### 系统参数 (system)
 
-| 参数                      | 随项目配置值    | 内置默认值    | 说明                          |
-| ----------------------- | --------- | -------- | ----------------------------- |
-| `pipe_buffer_size`      | 10000000  | 10000000 | 管道缓冲区大小（字节）                 |
-| `pipe_queue_size`       | 16        | 16       | 异步写入队列大小                    |
-| `ffmpeg_timeout`        | 10        | 10       | FFmpeg 启动超时（秒）              |
-| `stderr_thread_timeout` | 5         | 5        | 错误日志线程超时（秒）                 |
-| `video_alignment`       | 2         | 2        | 视频尺寸对齐到偶数，避免 1080 被放大到 1088 |
-| `max_queue_frames`      | 64        | 64       | 异步写入队列最大帧数                  |
+| 参数                      | 内置默认值    | 说明                          |
+| ----------------------- | -------- | ----------------------------- |
+| `pipe_buffer_size`      | 10000000 | 管道缓冲区大小（字节）                 |
+| `pipe_queue_size`       | 16       | 异步写入队列大小                    |
+| `ffmpeg_timeout`        | 10       | FFmpeg 启动超时（秒）              |
+| `stderr_thread_timeout` | 5        | 错误日志线程超时（秒）                 |
+| `video_alignment`       | 2        | 视频尺寸对齐到偶数，避免 1080 被放大到 1088 |
+| `max_queue_frames`      | 64       | 异步写入队列最大帧数                  |
 
 ## 打包
 
