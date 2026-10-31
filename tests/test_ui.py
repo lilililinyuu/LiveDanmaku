@@ -569,20 +569,51 @@ def test_download_page_format_field(qapp):
     window.close()
 
 
+def test_download_page_stop_button_wiring(qapp):
+    """停止按钮初始禁用；开始下载时启用；stopped 信号到达后恢复。"""
+    apply_theme(qapp)
+    window = LiveDanmakuWindow()
+
+    assert window.btn_download_stop.text() == "停止下载"
+    assert not window.btn_download_stop.isEnabled()
+
+    # 模拟开始下载：开始禁用、停止启用
+    window.btn_download_start.setEnabled(False)
+    window.btn_download_stop.setEnabled(True)
+
+    from pathlib import Path
+
+    from livedanmaku.ui.worker import DownloadWorker
+
+    worker = DownloadWorker(
+        "http://example.com", "b", Path("."), 
+        want_video=True, want_chat=False, want_thumbnail=False,
+    )
+    window.download_worker = worker
+    worker.stopped.connect(window._on_download_stopped)
+    worker.stopped.emit("下载已停止，已下载的部分保留在下载目录。")
+
+    assert window.btn_download_start.isEnabled()
+    assert not window.btn_download_stop.isEnabled()
+
+    window.close()
+
+
 def test_main_window_sidebar_navigation(qapp):
-    """侧边栏应包含 4 个功能页，切换导航项应切换页面。"""
+    """侧边栏应包含 6 个功能页，切换导航项应切换页面。"""
     from PySide6.QtWidgets import QPushButton
 
     apply_theme(qapp)
     window = LiveDanmakuWindow()
 
-    assert window.nav_list.count() == 5
+    assert window.nav_list.count() == 6
     assert window.nav_list.item(0).text() == "压制设置"
     assert window.nav_list.item(1).text() == "弹幕样式"
     assert window.nav_list.item(2).text() == "JSON 转 XML"
     assert window.nav_list.item(3).text() == "下载内容"
     assert window.nav_list.item(4).text() == "直播录制"
-    assert window.pages.count() == 5
+    assert window.nav_list.item(5).text() == "视频转 GIF"
+    assert window.pages.count() == 6
     assert window.pages.currentIndex() == 0
 
     window.nav_list.setCurrentRow(2)

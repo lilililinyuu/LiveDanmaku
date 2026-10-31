@@ -262,11 +262,16 @@ class BatchWorker(QThread):
 
 
 class DownloadWorker(QThread):
-    """后台 yt-dlp 下载线程：进度行实时发到界面日志。"""
+    """后台 yt-dlp 下载线程：进度行实时发到界面日志。
+
+    request_stop() 可随时请求停止：已下载的部分保留在下载目录，
+    结果经 stopped 信号通知界面（区别于失败/成功）。
+    """
 
     log = Signal(str)
     succeeded = Signal(dict)
     failed = Signal(str)
+    stopped = Signal(str)
 
     def __init__(
         self,
@@ -289,6 +294,11 @@ class DownloadWorker(QThread):
         self.want_chat = want_chat
         self.want_thumbnail = want_thumbnail
         self.proxy = proxy
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        """请求停止下载（非阻塞；由 run() 内的轮询检测并终止进程）。"""
+        self._stop_requested = True
 
     def run(self) -> None:
         from ..core.pipeline import download_items
@@ -303,13 +313,78 @@ class DownloadWorker(QThread):
                 on_output=self.log.emit,
                 section=self.section,
                 proxy=self.proxy,
+                stop_flag=lambda: self._stop_requested,
             )
         except LiveDanmakuError as e:
             self.failed.emit(str(e))
         except Exception as e:
             self.failed.emit(f"下载失败: {e}")
         else:
-            self.succeeded.emit(result)
+            if result.get("stopped"):
+                self.stopped.emit("下载已停止，已下载的部分保留在下载目录。")
+            else:
+                self.succeeded.emit(result)
+
+
+class GifWorker(QThread):
+    """后台视频转 GIF 线程：request_stop 可终止转换（半成品自动清理）。"""
+
+    log = Signal(str)
+    succeeded = Signal(dict)
+    failed = Signal(str)
+    stopped = Signal(str)
+
+    def __init__(
+        self,
+        video: str,
+        gif_out: str | None,
+        *,
+        start: float,
+        end: float | None,
+        speed: float,
+        fps: int,
+        resolution: str,
+        quality: str,
+        force: bool,
+    ):
+        super().__init__()
+        self.video = video
+        self.gif_out = gif_out
+        self.start_time = start
+        self.end = end
+        self.speed = speed
+        self.fps = fps
+        self.resolution = resolution
+        self.quality = quality
+        self.force = force
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        """请求停止转换（非阻塞；由 make_gif 内的轮询检测）。"""
+        self._stop_requested = True
+
+    def run(self) -> None:
+        from ..core.gifmaker import make_gif
+
+        try:
+            result = make_gif(
+                self.video, self.gif_out,
+                start=self.start_time, end=self.end,
+                speed=self.speed, fps=self.fps,
+                resolution=self.resolution, quality=self.quality,
+                force=self.force,
+                on_output=self.log.emit,
+                stop_flag=lambda: self._stop_requested,
+            )
+        except LiveDanmakuError as e:
+            self.failed.emit(str(e))
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(f"GIF 转换失败: {e}")
+        else:
+            if result.get("stopped"):
+                self.stopped.emit("GIF 转换已停止，半成品已清理。")
+            else:
+                self.succeeded.emit(result)
 
 
 class RecordWorker(QThread):

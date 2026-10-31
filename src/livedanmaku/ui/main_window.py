@@ -63,12 +63,13 @@ from ._shared import (
     last_config_dir_path,
     last_dir_path,
 )
-from .file_picker import FileFolderPickerDialog
+from .file_picker import FileFolderPickerDialog, video_name_filters
 from .style_panel import StylePanel
 from .theme import CheckMarkCheckBox, refresh_dynamic_style
 from .worker import (
     BatchWorker,
     DownloadWorker,
+    GifWorker,
     MonitorWorker,
     RecordWorker,
     get_gui_log_bridge,
@@ -266,6 +267,7 @@ class LiveDanmakuWindow(QWidget):
         self.setMinimumSize(900, 640)
         self.worker: BatchWorker | None = None
         self.download_worker: DownloadWorker | None = None
+        self.gif_worker: GifWorker | None = None
         self.record_worker = None
         self.monitor_worker = None
         # 应用级日志桥：批次/下载/录制的全局日志（loguru→sys.stderr）
@@ -509,12 +511,14 @@ class LiveDanmakuWindow(QWidget):
         style_layout.addWidget(self.style_panel)
 
         # 侧边导航 + 功能页：压制设置 / 弹幕样式 / JSON 转 XML / 下载内容
+        # / 直播录制 / 视频转 GIF
         self.pages = QStackedWidget()
         self.pages.addWidget(self._wrap_scroll(settings_card))
         self.pages.addWidget(self._wrap_scroll(style_card))
         self.pages.addWidget(self._build_json_page())
         self.pages.addWidget(self._build_download_page())
         self.pages.addWidget(self._build_record_page())
+        self.pages.addWidget(self._build_gif_page())
 
         sidebar = self._build_sidebar()
         self.nav_list.currentRowChanged.connect(self.pages.setCurrentIndex)
@@ -695,7 +699,7 @@ class LiveDanmakuWindow(QWidget):
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("navList")
-        for label in ("压制设置", "弹幕样式", "JSON 转 XML", "下载内容", "直播录制"):
+        for label in ("压制设置", "弹幕样式", "JSON 转 XML", "下载内容", "直播录制", "视频转 GIF"):
             self.nav_list.addItem(label)
         self.nav_list.setCurrentRow(0)
         # 纵向填满侧边栏：功能项少时不留底部空白，也不会压缩出内部滚动
@@ -1115,6 +1119,252 @@ class LiveDanmakuWindow(QWidget):
         page_layout.addStretch(1)
         return page
 
+    def _build_gif_page(self) -> QWidget:
+        """「视频转 GIF」功能页：选取片段 / 倍速 / 帧率 / 画幅 / 质量。"""
+        card = QFrame()
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("视频转 GIF")
+        title.setObjectName("sectionTitle")
+        description = QLabel(
+            "用 ffmpeg 把视频片段转成高质量 GIF：自动提取调色板，"
+            "可选取片段、调整倍速、帧率、画幅宽度与质量档位。"
+        )
+        description.setObjectName("sectionDescription")
+        description.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(description)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        video_row = QHBoxLayout()
+        video_row.setSpacing(8)
+        self.gif_video_edit = QLineEdit()
+        self.gif_video_edit.setPlaceholderText("D:\\…\\视频.mp4")
+        video_row.addWidget(self.gif_video_edit, 1)
+        self.btn_gif_browse = QPushButton("浏览…")
+        self.btn_gif_browse.setToolTip("打开文件选择器导入视频，选完自动读取视频信息")
+        self.btn_gif_browse.clicked.connect(self.browse_gif_video)
+        video_row.addWidget(self.btn_gif_browse)
+        self.btn_gif_info = QPushButton("读取信息")
+        self.btn_gif_info.setToolTip("读取视频分辨率与时长，并限制可选的时间范围")
+        self.btn_gif_info.clicked.connect(self.refresh_gif_info)
+        video_row.addWidget(self.btn_gif_info)
+        form.addRow("视频文件", video_row)
+
+        self.gif_info_label = QLabel("（未读取）")
+        self.gif_info_label.setObjectName("sectionDescription")
+        form.addRow("视频信息", self.gif_info_label)
+
+        time_row = QHBoxLayout()
+        time_row.setSpacing(8)
+        self.gif_start_spin = QDoubleSpinBox()
+        self.gif_start_spin.setRange(0.0, 36000.0)
+        self.gif_start_spin.setDecimals(1)
+        self.gif_start_spin.setSingleStep(0.5)
+        self.gif_start_spin.setSuffix(" 秒")
+        self.gif_start_spin.setToolTip("片段开始时间（视频秒数）")
+        time_row.addWidget(QLabel("开始"))
+        time_row.addWidget(self.gif_start_spin)
+        time_row.addWidget(QLabel("结束"))
+        self.gif_end_spin = QDoubleSpinBox()
+        self.gif_end_spin.setRange(0.0, 36000.0)
+        self.gif_end_spin.setDecimals(1)
+        self.gif_end_spin.setSingleStep(0.5)
+        self.gif_end_spin.setSuffix(" 秒")
+        self.gif_end_spin.setValue(0.0)
+        self.gif_end_spin.setToolTip(
+            "片段结束时间（视频秒数）；0 = 到视频结尾。结束 - 开始至少 0.1 秒。"
+        )
+        time_row.addWidget(self.gif_end_spin)
+        time_row.addStretch(1)
+        form.addRow("片段范围", time_row)
+
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(8)
+        self.gif_speed_spin = QDoubleSpinBox()
+        self.gif_speed_spin.setRange(0.25, 4.0)
+        self.gif_speed_spin.setSingleStep(0.25)
+        self.gif_speed_spin.setDecimals(2)
+        self.gif_speed_spin.setValue(1.0)
+        self.gif_speed_spin.setSuffix(" 倍")
+        self.gif_speed_spin.setToolTip(
+            "播放倍速：>1 加速（GIF 更短更小），<1 减速；0.25~4.0。"
+        )
+        speed_row.addWidget(self.gif_speed_spin)
+        speed_row.addWidget(QLabel("帧率"))
+        self.gif_fps_spin = QSpinBox()
+        self.gif_fps_spin.setRange(5, 30)
+        self.gif_fps_spin.setValue(15)
+        self.gif_fps_spin.setSuffix(" fps")
+        self.gif_fps_spin.setToolTip("GIF 帧率：越高越流畅、文件越大；5~30。")
+        speed_row.addWidget(self.gif_fps_spin)
+        speed_row.addStretch(1)
+        form.addRow("倍速 / 帧率", speed_row)
+
+        size_row = QHBoxLayout()
+        size_row.setSpacing(8)
+        size_row.addWidget(QLabel("分辨率"))
+        self.gif_resolution_combo = QComboBox()
+        self.gif_resolution_combo.addItems(["original", "1080p", "720p", "480p", "360p"])
+        self.gif_resolution_combo.setCurrentText("original")
+        self.gif_resolution_combo.setToolTip(
+            "输出 GIF 画幅：original=保持视频分辨率；1080p/720p/480p/360p = "
+            "宽度 1920/1280/854/640，高度按视频比例缩放。表情包常用 480p。"
+        )
+        size_row.addWidget(self.gif_resolution_combo)
+        size_row.addWidget(QLabel("调色板"))
+        self.gif_quality_combo = QComboBox()
+        self.gif_quality_combo.addItems(["high", "medium", "low"])
+        self.gif_quality_combo.setCurrentText("medium")
+        self.gif_quality_combo.setToolTip(
+            "GIF 调色板/抖动精度（与分辨率无关）："
+            "high=全色调色板+sierra2_4a 抖动（文件最大）；"
+            "medium=bayer 抖动；low=64 色调色板（文件最小）。"
+        )
+        size_row.addWidget(self.gif_quality_combo)
+        size_row.addStretch(1)
+        form.addRow("分辨率 / 调色板", size_row)
+
+        self.gif_out_edit = QLineEdit()
+        self.gif_out_edit.setPlaceholderText("留空 = 视频同目录 <名字>-<起>-<止>s.gif")
+        form.addRow("输出 GIF", self.gif_out_edit)
+
+        self.gif_force_check = CheckMarkCheckBox("覆盖已存在的输出")
+        form.addRow("", self.gif_force_check)
+
+        self.gif_result_label = QLabel("")
+        self.gif_result_label.setObjectName("sectionDescription")
+        self.gif_result_label.setWordWrap(True)
+        form.addRow("转换结果", self.gif_result_label)
+
+        gif_btn_row = QHBoxLayout()
+        gif_btn_row.setSpacing(8)
+        self.btn_gif_start = QPushButton("开始转换")
+        self.btn_gif_start.clicked.connect(self.start_gif_conversion)
+        gif_btn_row.addWidget(self.btn_gif_start)
+        self.btn_gif_stop = QPushButton("停止转换")
+        self.btn_gif_stop.setToolTip(
+            "停止当前转换：终止 ffmpeg 进程，半成品 GIF 自动清理。"
+        )
+        self.btn_gif_stop.clicked.connect(self.stop_gif_conversion)
+        self.btn_gif_stop.setEnabled(False)
+        gif_btn_row.addWidget(self.btn_gif_stop)
+        gif_btn_row.addStretch(1)
+        form.addRow(gif_btn_row)
+
+        layout.addLayout(form)
+        return self._hug_content_page(card)
+
+    def browse_gif_video(self) -> None:
+        """打开文件选择器导入视频；选完自动读取视频信息。"""
+        start = self.gif_video_edit.text().strip() or self.last_dir
+        filters = " ".join(video_name_filters())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择视频文件", start, f"视频文件 ({filters});;所有文件 (*)"
+        )
+        if path:
+            self.gif_video_edit.setText(path)
+            self.refresh_gif_info()
+
+    def refresh_gif_info(self) -> None:
+        """读取视频分辨率与时长，写入信息栏并钳制时间范围。"""
+        from ..core.gifmaker import probe_video_summary
+
+        video = self.gif_video_edit.text().strip()
+        if not video:
+            self.gif_result_label.setText("请先填写视频文件路径。")
+            return
+        try:
+            info = probe_video_summary(video)
+        except LiveDanmakuError as e:
+            self.gif_info_label.setText(f"读取失败: {e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            self.gif_info_label.setText(f"读取失败: {e}")
+            return
+        duration = float(info["duration"])
+        self.gif_info_label.setText(
+            f"{info['width']}×{info['height']}，{info['fps']:.2f} fps，"
+            f"时长 {duration:.1f} 秒"
+        )
+        for spin in (self.gif_start_spin, self.gif_end_spin):
+            spin.setMaximum(max(0.0, duration))
+
+    def start_gif_conversion(self) -> None:
+        """校验输入并启动后台 GIF 转换。"""
+        video = self.gif_video_edit.text().strip()
+        if not video:
+            self.gif_result_label.setText("请先填写视频文件路径。")
+            return
+        end = self.gif_end_spin.value()
+        self.gif_worker = GifWorker(
+            video,
+            self.gif_out_edit.text().strip() or None,
+            start=self.gif_start_spin.value(),
+            end=end if end > 0 else None,
+            speed=self.gif_speed_spin.value(),
+            fps=self.gif_fps_spin.value(),
+            resolution=self.gif_resolution_combo.currentText(),
+            quality=self.gif_quality_combo.currentText(),
+            force=self.gif_force_check.isChecked(),
+        )
+        self.gif_worker.log.connect(self.append_log)
+        self.gif_worker.succeeded.connect(self._on_gif_succeeded)
+        self.gif_worker.failed.connect(self._on_gif_failed)
+        self.gif_worker.stopped.connect(self._on_gif_stopped)
+        self.btn_gif_start.setEnabled(False)
+        self.btn_gif_stop.setEnabled(True)
+        self._set_status("GIF 转换中", "busy")
+        self.gif_result_label.setText("转换中…")
+        self.append_log(f"开始转换 GIF: {video}")
+        self.gif_worker.start()
+
+    def stop_gif_conversion(self) -> None:
+        """停止当前 GIF 转换（半成品自动清理）。"""
+        worker = self.gif_worker
+        if worker is None or not worker.isRunning():
+            self.btn_gif_stop.setEnabled(False)
+            return
+        self.btn_gif_stop.setEnabled(False)
+        self.append_log("正在停止 GIF 转换…")
+        worker.request_stop()
+
+    def _on_gif_succeeded(self, result: dict) -> None:
+        """GIF 转换完成（主线程）：展示产出。"""
+        self.btn_gif_start.setEnabled(True)
+        self.btn_gif_stop.setEnabled(False)
+        self._set_status("等待任务", "idle")
+        gif = result.get("gif")
+        size_mb = gif.stat().st_size / 2**20 if gif is not None else 0.0
+        message = (
+            f"GIF 转换完成: {gif}（{size_mb:.1f} MB，"
+            f"片段 {result.get('clip_duration', 0):.1f}s，"
+            f"输出时长 {result.get('output_duration', 0):.1f}s）"
+        )
+        self.gif_result_label.setText(message)
+        self.append_log(message)
+
+    def _on_gif_failed(self, message: str) -> None:
+        """GIF 转换失败（主线程）：恢复按钮并提示。"""
+        self.btn_gif_start.setEnabled(True)
+        self.btn_gif_stop.setEnabled(False)
+        self._set_status("GIF 转换失败", "error")
+        self.gif_result_label.setText(f"转换失败: {message}")
+        self.append_log(f"GIF 转换失败: {message}")
+
+    def _on_gif_stopped(self, message: str) -> None:
+        """GIF 转换被用户停止（主线程）：恢复按钮并记录日志。"""
+        self.btn_gif_start.setEnabled(True)
+        self.btn_gif_stop.setEnabled(False)
+        self._set_status("等待任务", "idle")
+        self.gif_result_label.setText("转换已停止。")
+        self.append_log(f"GIF 转换已停止: {message}")
+
     def _build_download_page(self) -> QWidget:
         """「下载内容」功能页：yt-dlp 下载视频 / 弹幕 / 封面。"""
         try:
@@ -1197,6 +1447,13 @@ class LiveDanmakuWindow(QWidget):
         self.btn_download_start = QPushButton("开始下载")
         self.btn_download_start.clicked.connect(self.start_download)
         download_row.addWidget(self.btn_download_start)
+        self.btn_download_stop = QPushButton("停止下载")
+        self.btn_download_stop.setToolTip(
+            "停止当前下载：终止 yt-dlp 进程（含子进程），已下载的部分保留在下载目录。"
+        )
+        self.btn_download_stop.clicked.connect(self.stop_download)
+        self.btn_download_stop.setEnabled(False)
+        download_row.addWidget(self.btn_download_stop)
         download_row.addStretch(1)
         layout.addLayout(download_row)
         return self._hug_content_page(card)
@@ -1692,6 +1949,7 @@ class LiveDanmakuWindow(QWidget):
                 return
             section = f"*{start_text or ''}-{end_text or ''}"
         self.btn_download_start.setEnabled(False)
+        self.btn_download_stop.setEnabled(True)
         self._set_status("正在下载", "busy")
         self.append_log("")
         self.append_log(f"开始下载: {url}（后台进行，进度见下方日志）")
@@ -1713,11 +1971,30 @@ class LiveDanmakuWindow(QWidget):
         self.download_worker.log.connect(self.append_log)
         self.download_worker.succeeded.connect(self._on_download_succeeded)
         self.download_worker.failed.connect(self._on_download_failed)
+        self.download_worker.stopped.connect(self._on_download_stopped)
         self.download_worker.start()
+
+    def stop_download(self) -> None:
+        """停止当前后台下载（保留已下载的部分）。"""
+        worker = self.download_worker
+        if worker is None or not worker.isRunning():
+            self.btn_download_stop.setEnabled(False)
+            return
+        self.btn_download_stop.setEnabled(False)
+        self.append_log("正在停止下载…（等待 yt-dlp 退出，已下载的部分会保留）")
+        worker.request_stop()
+
+    def _on_download_stopped(self, message: str) -> None:
+        """下载被用户停止（主线程）：恢复按钮并记录日志。"""
+        self.btn_download_start.setEnabled(True)
+        self.btn_download_stop.setEnabled(False)
+        self._set_status("等待任务", "idle")
+        self.append_log(f"下载已停止: {message}")
 
     def _on_download_succeeded(self, result: dict) -> None:
         """下载完成（主线程）：展示结果并处理后续（转 XML / 加入队列 / 打开封面）。"""
         self.btn_download_start.setEnabled(True)
+        self.btn_download_stop.setEnabled(False)
         self._set_status("等待任务", "idle")
         out_dir = (
             Path(self.download_worker.out_dir) if self.download_worker else Path.cwd()
@@ -1813,6 +2090,7 @@ class LiveDanmakuWindow(QWidget):
     def _on_download_failed(self, message: str) -> None:
         """下载失败（主线程）：恢复按钮并提示。"""
         self.btn_download_start.setEnabled(True)
+        self.btn_download_stop.setEnabled(False)
         self._set_status("下载失败", "error")
         self.append_log(f"下载失败: {message}")
         QMessageBox.critical(self, "下载失败", message)

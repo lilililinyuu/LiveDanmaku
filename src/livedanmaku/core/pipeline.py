@@ -109,6 +109,7 @@ def download_items(
     on_output: Callable[[str], None] | None = None,
     section: str | None = None,
     proxy: str = "",
+    stop_flag: Callable[[], bool] | None = None,
 ) -> dict[str, Path | None]:
     """按需下载视频 / 实时弹幕 JSON / 封面，三者可任意组合。
 
@@ -117,14 +118,17 @@ def download_items(
     视频下载），拆分后互不阻塞。
 
     封面会统一转为 PNG 并清理原始图片。返回
-    {'video': Path|None, 'chat': Path|None, 'thumbnail': Path|None}，
-    未选择的项为 None。
+    {'video': Path|None, 'chat': Path|None, 'thumbnail': Path|None,
+    'stopped': bool}，未选择的项为 None；stopped=True 表示因 stop_flag
+    主动停止，已下载的部分保留。
 
     on_output: yt-dlp 每输出一行（含下载进度）时调用一次，用于界面日志。
     section: 下载指定片段（yt-dlp --download-sections），形如 "5:01-10:43"，
     单边界可用 "5:01-" / "-10:43"；None = 下载完整视频。
     proxy: 显式代理（--proxy）；非空时还会剥离子进程环境中可能失配的
     代理变量，避免环境残留代理干扰下载与 ffmpeg 切片。
+    stop_flag: 返回 True 时终止全部 yt-dlp 进程（含子进程），尽快返回
+    部分结果；返回字典含 "stopped": True，已下载的文件保留在下载目录。
     """
     if not (want_video or want_chat or want_thumbnail):
         raise LiveDanmakuError("未选择任何要下载的内容。")
@@ -211,12 +215,14 @@ def download_items(
         ]
         _spawn("弹幕", chat_cmd)
 
+    stopped = False
     video: Path | None = None
     chat: Path | None = None
     error_messages: list[str] = []
     for label, process, lines, tail in spawned:
-        returncode = process.wait()
-        if returncode != 0:
+        returncode, was_stopped = _wait_or_stop(process, stop_flag)
+        stopped = stopped or was_stopped
+        if returncode != 0 and not was_stopped:
             error_messages.append(
                 f"{label}下载失败（退出码 {returncode}）: "
                 + ("\\n".join(list(tail)[-10:]) or "无输出")
@@ -235,6 +241,15 @@ def download_items(
         chat = _find_new_file(out_dir, before, ".live_chat.json", ".json")
         if chat is not None:
             logger.info("从下载目录找到弹幕 JSON: {}", chat.name)
+
+    if stopped:
+        # 用户主动停止：不报错、不做封面转换，已下载的部分保留原样
+        logger.warning("下载已被用户停止：已下载的部分保留在下载目录")
+        if on_output is not None:
+            on_output("[警告] 下载已停止，已下载的部分保留在下载目录")
+        return {
+            "video": video, "chat": chat, "thumbnail": None, "stopped": True,
+        }
 
     thumbnail: Path | None = None
     if want_thumbnail:
@@ -263,7 +278,53 @@ def download_items(
     if want_chat and chat is None and not error_messages:
         logger.warning("该视频没有可下载的弹幕 JSON（可能没有直播弹幕）")
 
-    return {"video": video, "chat": chat, "thumbnail": thumbnail}
+    return {
+        "video": video, "chat": chat, "thumbnail": thumbnail, "stopped": False,
+    }
+
+
+def _wait_or_stop(
+    process: subprocess.Popen,
+    stop_flag: Callable[[], bool] | None,
+) -> tuple[int, bool]:
+    """等待子进程退出；stop_flag 触发时终止整个进程树。
+
+    返回 (退出码, 是否因 stop_flag 主动停止)。
+    """
+    while True:
+        if stop_flag is not None and stop_flag():
+            _terminate_tree(process)
+            return process.wait(), True
+        try:
+            return process.wait(timeout=0.25), False
+        except subprocess.TimeoutExpired:
+            continue
+        except TypeError:
+            # 测试假进程的 wait() 不接受 timeout：直接取结果
+            return process.wait(), False
+
+
+def _terminate_tree(process: subprocess.Popen) -> None:
+    """强制终止进程及其全部子进程。
+
+    yt-dlp 合并音视频时会派生 ffmpeg 子进程；只终止父进程会留下仍在
+    写 .part 的孤儿 ffmpeg，产物被占用且磁盘继续增长。
+    """
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True, check=False,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
 
 
 def _find_new_file(

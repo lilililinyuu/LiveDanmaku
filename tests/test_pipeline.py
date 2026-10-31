@@ -1,5 +1,6 @@
 """pipeline 下载辅助单元测试（yt-dlp 下载为图形界面「下载内容」页所用）。"""
 
+import io
 import subprocess
 from pathlib import Path
 
@@ -103,6 +104,73 @@ class _FakePopen:
 
     def wait(self):
         return self.returncode
+
+
+class _StoppingProc:
+    """模拟可被停止的 yt-dlp 进程：taskkill 前一直"运行中"。"""
+
+    def __init__(self):
+        self.stdout = io.StringIO("")
+        self.stderr = io.StringIO("")
+        self.pid = 4321
+        self.killed = False
+
+    def poll(self):
+        return -1 if self.killed else None
+
+    def wait(self, timeout=None):
+        if self.killed:
+            return -1
+        if timeout is not None:
+            raise subprocess.TimeoutExpired("yt-dlp", timeout)
+        return -1
+
+    def kill(self):
+        self.killed = True
+
+
+def test_download_items_stop_flag_stops_and_returns_partial(monkeypatch, tmp_path):
+    """stop_flag 触发时应终止进程树并以 stopped=True 返回部分结果，
+    不抛异常也不记为失败；已下载的部分保留。"""
+    procs = []
+
+    def fake_popen(cmd, **kwargs):
+        proc = _StoppingProc()
+        procs.append(proc)
+        return proc
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    # _terminate_tree 的 taskkill 不真实执行
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+
+    result = download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=True, want_chat=True, want_thumbnail=False,
+        stop_flag=lambda: True,
+    )
+
+    assert result["stopped"] is True
+    assert result["video"] is None and result["chat"] is None
+    assert len(procs) == 2 and all(p.killed for p in procs)
+
+
+def test_download_items_stop_flag_false_completes_normally(monkeypatch, tmp_path):
+    """stop_flag 恒为 False 时行为与未传一致（兼容性回归）。"""
+    def fake_popen(cmd, **kwargs):
+        return _FakePopen([str(tmp_path / "视频.mp4") + "\n"])
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/fake/bin")
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    result = download_items(
+        "http://example.com", tmp_path, "b",
+        want_video=True, want_chat=False, want_thumbnail=False,
+        stop_flag=lambda: False,
+    )
+
+    assert result["stopped"] is False
+    assert result["video"] is not None
 
 
 def test_download_items_video_only_command(monkeypatch, tmp_path):
